@@ -133,8 +133,9 @@ async function generatePdfBuffer(htmlContent) {
     await page.setContent(htmlContent, { waitUntil: 'networkidle0', timeout: 60000 });
     return await page.pdf({
       format: 'A4',
+      landscape: false,
       printBackground: true,
-      margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' },
+      margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
     });
   } finally {
     await browser.close().catch(() => {});

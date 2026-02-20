@@ -159,43 +159,47 @@ export function generateReport(session, brandKey = null, autoprint = false) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ADA Accessibility Report – ${escapeHtml(hostname)}</title>
   <style>
+    @page { size: A4 portrait; margin: 10mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #1e293b; background: #fff; line-height: 1.5; }
-    .page { max-width: 900px; margin: 0 auto; padding: 40px 32px; }
-    h1 { font-size: 28px; font-weight: 700; color: #0f172a; }
-    h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin: 32px 0 16px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
-    h3 { font-size: 16px; font-weight: 600; color: #1e293b; margin: 20px 0 10px; }
-    .cover { text-align: center; padding: 60px 0 40px; border-bottom: 3px solid ${accentColor}; margin-bottom: 40px; }
-    .cover-logo { max-height: 60px; max-width: 240px; object-fit: contain; margin: 0 auto 24px; display: block; }
-    .cover .logo-text { font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: ${accentColor}; margin-bottom: 20px; }
-    .cover h1 { font-size: 32px; margin-bottom: 8px; }
-    .cover .site-url { font-size: 18px; color: ${accentColor}; margin-bottom: 6px; }
-    .cover .meta { font-size: 13px; color: #64748b; margin-bottom: 30px; }
-    .cover .score-wrap { display: inline-block; margin: 20px auto; }
-    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0; }
-    .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; text-align: center; }
-    .stat-card .value { font-size: 28px; font-weight: 700; }
-    .stat-card .label { font-size: 12px; color: #64748b; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .severity-bar { display: flex; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
-    .sev-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-    .sev-dot { width: 12px; height: 12px; border-radius: 50%; }
-    .score-dist { display: flex; gap: 8px; margin: 12px 0; align-items: center; }
-    .dist-bar { height: 24px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #fff; min-width: 30px; padding: 0 8px; }
-    .issues-summary table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .issues-summary th { background: #f8fafc; padding: 8px 12px; text-align: left; border: 1px solid #e2e8f0; font-weight: 600; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .issues-summary td { padding: 8px 12px; border: 1px solid #e2e8f0; vertical-align: top; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #1e293b; background: #fff; line-height: 1.45; }
+    .page { max-width: 900px; margin: 0 auto; padding: 20px 24px; }
+    h1 { font-size: 24px; font-weight: 700; color: #0f172a; }
+    h2 { font-size: 17px; font-weight: 700; color: #0f172a; margin: 18px 0 10px; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
+    h3 { font-size: 14px; font-weight: 600; color: #1e293b; margin: 12px 0 6px; }
+    .cover { text-align: center; padding: 28px 0 20px; border-bottom: 3px solid ${accentColor}; margin-bottom: 20px; }
+    .cover-logo { max-height: 48px; max-width: 200px; object-fit: contain; margin: 0 auto 16px; display: block; }
+    .cover .logo-text { font-size: 12px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: ${accentColor}; margin-bottom: 14px; }
+    .cover h1 { font-size: 26px; margin-bottom: 6px; }
+    .cover .site-url { font-size: 15px; color: ${accentColor}; margin-bottom: 4px; }
+    .cover .meta { font-size: 12px; color: #64748b; margin-bottom: 16px; }
+    .cover .score-wrap { display: inline-block; margin: 12px auto; }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+    .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; text-align: center; }
+    .stat-card .value { font-size: 22px; font-weight: 700; }
+    .stat-card .label { font-size: 11px; color: #64748b; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .severity-bar { display: flex; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
+    .sev-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+    .sev-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .score-dist { display: flex; gap: 6px; margin: 8px 0; align-items: center; }
+    .dist-bar { height: 20px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 28px; padding: 0 6px; }
+    .issues-summary table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .issues-summary th { background: #f8fafc; padding: 6px 10px; text-align: left; border: 1px solid #e2e8f0; font-weight: 600; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .issues-summary td { padding: 6px 10px; border: 1px solid #e2e8f0; vertical-align: top; }
     .issues-summary tr:nth-child(even) td { background: #f8fafc; }
-    .sev-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-    .page-section { margin-bottom: 40px; page-break-inside: avoid; }
-    .page-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; margin-bottom: 12px; }
-    .page-url { font-size: 14px; font-weight: 600; word-break: break-all; }
-    .page-score-badge { font-size: 20px; font-weight: 700; padding: 4px 12px; border-radius: 6px; white-space: nowrap; }
-    .print-btn { position: fixed; top: 20px; right: 20px; background: ${accentColor}; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
+    .sev-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .page-section { margin-bottom: 10px; page-break-inside: avoid; }
+    .page-header { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 6px; }
+    .page-header.has-issues { margin-bottom: 8px; }
+    .page-url { font-size: 12px; font-weight: 600; word-break: break-all; flex: 1; }
+    .page-score-badge { font-size: 15px; font-weight: 700; padding: 3px 9px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; }
+    .no-issues-inline { margin-left: auto; font-size: 12px; color: #16a34a; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+    .issue-count-label { margin-left: auto; font-size: 12px; color: #64748b; white-space: nowrap; flex-shrink: 0; }
+    .print-btn { position: fixed; top: 16px; right: 16px; background: ${accentColor}; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
     .print-btn:hover { opacity: 0.9; }
-    .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 12px; color: #94a3b8; }
+    .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8; }
     @media print {
       .print-btn { display: none; }
-      .page { padding: 20px; }
+      .page { padding: 0; }
       .page-section { page-break-inside: avoid; }
       h2 { page-break-after: avoid; }
     }
@@ -283,16 +287,21 @@ export function generateReport(session, brandKey = null, autoprint = false) {
 
     <!-- Page-by-page Results -->
     <h2>Page-by-Page Results</h2>
-    ${sortedPages.map(page => `
+    ${sortedPages.map(page => {
+      const hasIssues = page.issues && page.issues.length > 0;
+      return `
       <div class="page-section">
-        <div class="page-header" style="background:${scoreBg(page.score)};border:1px solid ${scoreColor(page.score)}33">
+        <div class="page-header ${hasIssues ? 'has-issues' : ''}" style="background:${scoreBg(page.score)};border:1px solid ${scoreColor(page.score)}33">
           <span class="page-score-badge" style="color:${scoreColor(page.score)};background:${scoreBg(page.score)}">${page.score ?? 'ERR'}</span>
           <span class="page-url">${escapeHtml(page.url)}</span>
-          <span style="margin-left:auto;font-size:13px;color:#64748b;">${page.issueCount} issue${page.issueCount !== 1 ? 's' : ''}</span>
+          ${hasIssues
+            ? `<span class="issue-count-label">${page.issueCount} issue${page.issueCount !== 1 ? 's' : ''}</span>`
+            : `<span class="no-issues-inline">&#10003; No accessibility issues detected.</span>`
+          }
         </div>
-        ${renderIssuesTable(page.issues)}
-      </div>
-    `).join('')}
+        ${hasIssues ? renderIssuesTable(page.issues) : ''}
+      </div>`;
+    }).join('')}
 
     ${pages.filter(p => p.status === 'error').length > 0 ? `
     <h2>Pages with Errors</h2>
