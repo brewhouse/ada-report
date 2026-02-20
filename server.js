@@ -133,7 +133,7 @@ app.post('/api/audit', (req, res) => {
   const session = {
     id: auditId,
     url,
-    maxPages: Math.min(Math.max(1, parseInt(maxPages) || 50), 200),
+    maxPages: Math.min(Math.max(1, parseInt(maxPages) || 50), 5000),
     status: 'queued',
     startTime: new Date().toISOString(),
     endTime: null,
