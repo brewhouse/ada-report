@@ -439,6 +439,10 @@ function renderIssues(issues) {
         <span class="sev-tag ${issue.severity}">${escapeHtml(issue.severity)}</span>
         <span class="issue-title">${escapeHtml(issue.title)}</span>
         <span class="wcag-tag">WCAG ${escapeHtml(issue.wcag)} (${escapeHtml(issue.wcagLevel)})</span>
+        <button class="btn-fix-issue btn-sm" data-issue-id="${escapeHtml(issue.id)}" title="Fix this issue on WordPress">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Fix
+        </button>
       </div>
       <div class="issue-card-body">
         ${issue.description ? `<p class="issue-desc">${escapeHtml(issue.description)}</p>` : ''}
@@ -457,6 +461,17 @@ function renderIssues(issues) {
       </div>
     </div>
   `).join('');
+
+  // Attach Fix button handlers
+  list.querySelectorAll('.btn-fix-issue').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const issueId = btn.dataset.issueId;
+      const page = currentSession?.pages.find(p => p.url === selectedPageUrl);
+      const issue = page?.issues?.find(i => i.id === issueId);
+      if (issue && page) openFixModal(issue, page.url);
+    });
+  });
 }
 
 // Severity filter
@@ -577,10 +592,170 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 // Close modals on Escape key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    ['brand-modal', 'email-modal'].forEach(id => {
+    ['brand-modal', 'email-modal', 'fix-modal'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.style.display !== 'none') closeModal(id);
     });
+  }
+});
+
+// ===================== FIX MODAL =====================
+
+const WP_CREDS_PREFIX = 'wp_creds_';
+
+function loadWpCreds(hostname) {
+  try { return JSON.parse(localStorage.getItem(WP_CREDS_PREFIX + hostname) || 'null'); } catch { return null; }
+}
+
+function saveWpCreds(hostname, username, password) {
+  localStorage.setItem(WP_CREDS_PREFIX + hostname, JSON.stringify({ username, password }));
+}
+
+// The issue and page URL currently loaded in the Fix modal
+let fixModalIssue = null;
+let fixModalPageUrl = null;
+
+function openFixModal(issue, pageUrl) {
+  fixModalIssue = issue;
+  fixModalPageUrl = pageUrl;
+
+  // Issue summary
+  document.getElementById('fix-modal-title').textContent = 'Fix Issue';
+  document.getElementById('fix-issue-summary').innerHTML = `
+    <div class="fix-issue-label">
+      <span class="sev-tag ${escapeHtml(issue.severity)}" style="font-size:11px">${escapeHtml(issue.severity)}</span>
+      <strong>${escapeHtml(issue.title)}</strong>
+      <span class="wcag-tag" style="font-size:11px">WCAG ${escapeHtml(issue.wcag)}</span>
+    </div>`;
+
+  // Live site label
+  try {
+    document.getElementById('fix-live-url-display').textContent = new URL(pageUrl).origin;
+  } catch {}
+
+  // Reset to live site
+  document.getElementById('fix-target-live').checked = true;
+  document.getElementById('fix-dev-url-wrap').style.display = 'none';
+  document.getElementById('fix-dev-url').value = '';
+
+  // Pre-fill credentials from localStorage
+  const hostname = new URL(pageUrl).hostname;
+  const saved = loadWpCreds(hostname);
+  document.getElementById('fix-wp-username').value = saved?.username || '';
+  document.getElementById('fix-wp-password').value = saved?.password || '';
+  document.getElementById('fix-save-creds-text').textContent = `Save credentials for ${hostname}`;
+  document.getElementById('fix-save-creds').checked = true;
+
+  // Reset result panel
+  const result = document.getElementById('fix-result');
+  result.style.display = 'none';
+  result.innerHTML = '';
+
+  // Reset apply button
+  const btn = document.getElementById('fix-apply-btn');
+  btn.disabled = false;
+  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Apply Fix`;
+
+  openModal('fix-modal');
+}
+
+// Toggle dev URL input
+document.querySelectorAll('input[name="fix-target"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.getElementById('fix-dev-url-wrap').style.display =
+      document.getElementById('fix-target-dev').checked ? 'block' : 'none';
+  });
+});
+
+document.getElementById('fix-modal-close').addEventListener('click', () => closeModal('fix-modal'));
+document.getElementById('fix-cancel-btn').addEventListener('click', () => closeModal('fix-modal'));
+
+document.getElementById('fix-apply-btn').addEventListener('click', async () => {
+  if (!fixModalIssue || !fixModalPageUrl || !currentAuditId) return;
+
+  const targetType = document.getElementById('fix-target-dev').checked ? 'dev' : 'live';
+  const devUrl = document.getElementById('fix-dev-url').value.trim();
+  const username = document.getElementById('fix-wp-username').value.trim();
+  const password = document.getElementById('fix-wp-password').value.trim();
+
+  if (!username || !password) {
+    alert('Please enter WordPress username and application password.');
+    return;
+  }
+
+  if (targetType === 'dev' && !devUrl) {
+    alert('Please enter the dev site URL.');
+    return;
+  }
+
+  // Save credentials if checkbox is checked
+  if (document.getElementById('fix-save-creds').checked) {
+    const hostname = new URL(fixModalPageUrl).hostname;
+    saveWpCreds(hostname, username, password);
+  }
+
+  const btn = document.getElementById('fix-apply-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="mini-spinner" style="display:inline-block;margin-right:6px"></span> Applying…`;
+
+  const resultEl = document.getElementById('fix-result');
+  resultEl.style.display = 'none';
+  resultEl.innerHTML = '';
+
+  try {
+    const res = await fetch(`/api/audit/${currentAuditId}/fix`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pageUrl: fixModalPageUrl,
+        issue: fixModalIssue,
+        targetType,
+        devUrl: devUrl || null,
+        username,
+        password,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Fix request failed');
+
+    if (data.type === 'fixed') {
+      resultEl.innerHTML = `
+        <div class="fix-result-success">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          <div>
+            <strong>Fix applied successfully</strong>
+            <div style="font-size:13px;color:#475569;margin-top:2px">${escapeHtml(data.summary)}</div>
+          </div>
+        </div>`;
+      showToast('Fix applied to WordPress site');
+    } else {
+      // Code suggestion
+      const codeHtml = data.code
+        ? `<div class="fix-code-wrap">
+            <div class="fix-code-header">
+              Code to apply
+              <button class="fix-copy-btn" onclick="navigator.clipboard.writeText(${JSON.stringify(data.code)}).then(()=>{this.textContent='Copied!';setTimeout(()=>{this.textContent='Copy'},2000)})">Copy</button>
+            </div>
+            <pre class="fix-code-block"><code>${escapeHtml(data.code)}</code></pre>
+           </div>`
+        : '';
+      resultEl.innerHTML = `
+        <div class="fix-result-suggestion">
+          <div class="fix-suggestion-reason">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            ${escapeHtml(data.reason)}
+          </div>
+          ${codeHtml}
+        </div>`;
+    }
+
+    resultEl.style.display = 'block';
+  } catch (err) {
+    resultEl.innerHTML = `<div class="fix-result-error">Error: ${escapeHtml(err.message)}</div>`;
+    resultEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Apply Fix`;
   }
 });
 

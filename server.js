@@ -10,6 +10,7 @@ import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit } from './src/audit-manager.js';
 import { generateReport } from './src/report-generator.js';
+import { applyFix } from './src/wp-fixer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -343,6 +344,38 @@ app.post('/api/audit/:id/email', async (req, res) => {
   } catch (err) {
     console.error('[email] Error:', err.message);
     res.status(500).json({ error: 'Failed to send email: ' + err.message });
+  }
+});
+
+// AI Fix — POST body: { pageUrl, issue, targetType:'live'|'dev', devUrl, username, password }
+app.post('/api/audit/:id/fix', async (req, res) => {
+  const session = auditSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+  if (session.status !== 'completed') return res.status(400).json({ error: 'Audit not yet completed' });
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return res.status(503).json({
+      error: 'ANTHROPIC_API_KEY is not configured on this server. Add it to your Render environment variables.',
+    });
+  }
+
+  const { pageUrl, issue, targetType, devUrl, username, password } = req.body;
+  if (!pageUrl || !issue || !username || !password) {
+    return res.status(400).json({ error: 'Missing required fields: pageUrl, issue, username, password' });
+  }
+
+  const wpBaseUrl = (targetType === 'dev' && devUrl)
+    ? new URL(devUrl).origin
+    : new URL(pageUrl).origin;
+
+  const targetPageUrl = (targetType === 'dev' && devUrl) ? devUrl : pageUrl;
+
+  try {
+    const result = await applyFix({ wpBaseUrl, username, password, pageUrl: targetPageUrl, issue });
+    res.json(result);
+  } catch (err) {
+    console.error('[fix] Error:', err.message);
+    res.status(500).json({ error: 'Fix failed: ' + err.message });
   }
 });
 

@@ -341,6 +341,81 @@
     </div>
   </div>
 
+  <!-- ======================== FIX MODAL ======================== -->
+  <div id="fix-modal" class="modal-overlay" style="display:none" role="dialog" aria-modal="true">
+    <div class="modal-box modal-box-lg">
+      <div class="modal-header">
+        <h3 class="modal-title" id="fix-modal-title">Fix Issue</h3>
+        <button class="modal-close-btn" id="fix-modal-close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Issue summary (filled by JS) -->
+      <div id="fix-issue-summary" class="fix-issue-summary"></div>
+
+      <!-- Target site selection -->
+      <div class="modal-section">
+        <div class="modal-label">Apply fix to</div>
+        <div class="fix-radio-group">
+          <label class="fix-radio-label">
+            <input type="radio" name="fix-target" value="live" id="fix-target-live" checked>
+            <span class="fix-radio-text">
+              <strong>Live Site</strong>
+              <span id="fix-live-url-display" class="fix-radio-sub"></span>
+            </span>
+          </label>
+          <label class="fix-radio-label">
+            <input type="radio" name="fix-target" value="dev" id="fix-target-dev">
+            <span class="fix-radio-text">
+              <strong>Dev Site</strong>
+              <span class="fix-radio-sub">Enter a different URL</span>
+            </span>
+          </label>
+        </div>
+        <div id="fix-dev-url-wrap" class="fix-dev-url-wrap" style="display:none">
+          <input type="url" id="fix-dev-url" class="modal-input" placeholder="https://dev.example.com">
+        </div>
+      </div>
+
+      <!-- WordPress credentials -->
+      <div class="modal-section">
+        <div class="modal-label">WordPress Credentials</div>
+        <div class="fix-credentials-grid">
+          <div>
+            <label class="fix-field-label" for="fix-wp-username">Username</label>
+            <input type="text" id="fix-wp-username" class="modal-input" placeholder="admin" autocomplete="username">
+          </div>
+          <div>
+            <label class="fix-field-label" for="fix-wp-password">Application Password</label>
+            <input type="password" id="fix-wp-password" class="modal-input" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx" autocomplete="current-password">
+          </div>
+        </div>
+        <p class="modal-hint">
+          Generate an Application Password in WP Admin → Users → Profile → Application Passwords.
+          Credentials are saved locally in your browser per site — never sent to our servers except during a fix request.
+        </p>
+        <label class="fix-save-creds-label">
+          <input type="checkbox" id="fix-save-creds" checked>
+          <span id="fix-save-creds-text">Save credentials for this site</span>
+        </label>
+      </div>
+
+      <div class="modal-footer">
+        <button id="fix-cancel-btn" class="btn-ghost btn-sm">Cancel</button>
+        <button id="fix-apply-btn" class="btn-fix btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Apply Fix
+        </button>
+      </div>
+
+      <!-- Result panel (shown after apply) -->
+      <div id="fix-result" class="fix-result" style="display:none"></div>
+    </div>
+  </div>
+
   <script src="app.js" type="module"></script>
 </body>
 </html>
