@@ -73,7 +73,6 @@ const HTTP = axios.create({
 async function fetchXml(url) {
   try {
     const res = await HTTP.get(url);
-    const ct = res.headers['content-type'] || '';
     // Accept XML or plain text (some servers misconfigure content-type)
     if (typeof res.data === 'string' && res.data.trim().startsWith('<')) {
       return res.data;
@@ -126,7 +125,7 @@ async function parseSitemap(xml, origin, depth = 0) {
 }
 
 async function discoverFromSitemap(rootUrl) {
-  const { origin, hostname } = new URL(rootUrl);
+  const { origin } = new URL(rootUrl);
   const candidates = [];
 
   // 1. Check robots.txt for Sitemap: directives (highest priority)
@@ -202,11 +201,23 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress) {
           'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)'
         );
 
-        // Navigate and wait for network to go quiet (handles SPA / REST-driven content)
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        // Fast initial load — DOMContentLoaded is enough for PHP/server-rendered pages
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        // Extra settle time for late-rendering frameworks (React, Vue, Angular, etc.)
-        await new Promise(r => setTimeout(r, 2000));
+        // Detect whether this is a server-rendered page (PHP/WordPress) or a JS SPA.
+        // Server-rendered pages have rich content immediately after DOMContentLoaded;
+        // React/Vue/Angular pages start nearly empty and fill in after API calls settle.
+        const [initialLinks, initialTextLen] = await Promise.all([
+          page.$$eval('a[href]', els => els.length).catch(() => 0),
+          page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0),
+        ]);
+        const isServerRendered = initialLinks >= 5 || initialTextLen > 400;
+
+        if (!isServerRendered) {
+          // SPA / JS-rendered — wait for network to go quiet then give React time to paint
+          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => {});
+          await new Promise(r => setTimeout(r, 1500));
+        }
 
         const finalUrl = page.url();
         const normFinal = normalizeUrl(rootUrl, finalUrl) || url;
