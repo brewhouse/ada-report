@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
+import nodemailer from 'nodemailer';
+import puppeteer from 'puppeteer';
 import { startAudit } from './src/audit-manager.js';
 import { generateReport } from './src/report-generator.js';
 
@@ -69,7 +71,6 @@ function broadcastToAudit(auditId, message) {
 }
 
 function sanitizeSession(session) {
-  // Strip raw lighthouse data from pages to keep payload manageable
   return {
     ...session,
     pages: session.pages.map(p => ({
@@ -86,7 +87,6 @@ function sanitizeSession(session) {
 
 function cleanOldSessions() {
   if (auditSessions.size < MAX_SESSIONS) return;
-  // Remove oldest completed/error sessions
   const sorted = [...auditSessions.entries()]
     .filter(([, s]) => s.status === 'completed' || s.status === 'error')
     .sort((a, b) => new Date(a[1].startTime) - new Date(b[1].startTime));
@@ -114,6 +114,34 @@ async function processAuditQueue() {
     processAuditQueue();
   }
 }
+
+// Generate a PDF buffer from HTML using Puppeteer
+async function generatePdfBuffer(htmlContent) {
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    executablePath,
+    args: [
+      '--no-sandbox', '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage', '--disable-gpu',
+      '--no-first-run', '--no-zygote',
+    ],
+  });
+  const page = await browser.newPage();
+  try {
+    // Use networkidle0 so external logo images have time to load
+    await page.setContent(htmlContent, { waitUntil: 'networkidle0', timeout: 60000 });
+    return await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' },
+    });
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+// ── Routes ─────────────────────────────────────────────────────────────────────
 
 // Start a new audit
 app.post('/api/audit', (req, res) => {
@@ -175,19 +203,123 @@ app.get('/api/audits', (_req, res) => {
   res.json(audits);
 });
 
-// Download HTML report
+// Download HTML report (supports ?brand=planeteria|digitaldeployment|pensionx and ?autoprint=true)
 app.get('/api/audit/:id/report', (req, res) => {
   const session = auditSessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Audit not found' });
   if (session.status !== 'completed') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
-  const reportHtml = generateReport(session);
+
+  const brand = req.query.brand || null;
+  const autoprint = req.query.autoprint === 'true';
+  const reportHtml = generateReport(session, brand, autoprint);
+
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
   const date = new Date().toISOString().split('T')[0];
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="accessibility-report-${domain}-${date}.html"`);
+
+  if (autoprint) {
+    // Open inline in browser (no download) so print dialog fires
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  } else {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="accessibility-report-${domain}-${date}.html"`);
+  }
   res.send(reportHtml);
+});
+
+// Email report — POST body: { emails: string[], brand: string }
+app.post('/api/audit/:id/email', async (req, res) => {
+  const session = auditSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+  if (session.status !== 'completed') {
+    return res.status(400).json({ error: 'Audit not yet completed' });
+  }
+
+  const { emails, brand } = req.body;
+
+  if (!emails || !Array.isArray(emails) || emails.length === 0) {
+    return res.status(400).json({ error: 'At least one email address is required' });
+  }
+
+  // Validate SMTP config
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    return res.status(503).json({
+      error: 'Email is not configured on this server. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables.',
+    });
+  }
+
+  try {
+    // Generate branded HTML report
+    const htmlContent = generateReport(session, brand || null, false);
+
+    // Convert to PDF
+    const pdfBuffer = await generatePdfBuffer(htmlContent);
+
+    // Build and send email
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+    const date = new Date().toISOString().split('T')[0];
+    const avgScore = session.summary?.averageScore ?? 0;
+
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to: emails.join(', '),
+      subject: `ADA Accessibility Report – ${session.url}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#107DC2;">ADA Accessibility Report</h2>
+          <p>Please find attached the ADA Accessibility Report for <strong>${session.url}</strong>.</p>
+          <table style="margin:20px 0;border-collapse:collapse;width:100%;">
+            <tr>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Pages Audited</td>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;">${session.summary?.totalPages ?? 0}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Average Score</td>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;">${avgScore}/100</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Total Issues</td>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;">${session.summary?.totalIssues ?? 0}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Critical</td>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;color:#dc2626;">${session.summary?.criticalIssues ?? 0}</td>
+            </tr>
+            <tr>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious</td>
+              <td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td>
+            </tr>
+          </table>
+          <p style="font-size:12px;color:#94a3b8;margin-top:32px;">
+            Generated by Planeteria Inquiros ADA Checker &bull; Powered by Google Lighthouse
+          </p>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: `accessibility-report-${domain}-${date}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    res.json({ success: true, message: `Report sent to ${emails.join(', ')}` });
+  } catch (err) {
+    console.error('[email] Error:', err.message);
+    res.status(500).json({ error: 'Failed to send email: ' + err.message });
+  }
 });
 
 // Serve the app for any other route (SPA fallback)

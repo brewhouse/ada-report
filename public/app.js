@@ -488,43 +488,125 @@ document.getElementById('new-audit-btn').addEventListener('click', () => {
   initLanding();
 });
 
-// Download Report button
+// Download HTML button
 document.getElementById('download-report-btn').addEventListener('click', () => {
   if (!currentAuditId) return;
   window.open(`/api/audit/${currentAuditId}/report`, '_blank');
 });
 
+// Print / Save PDF button — opens brand selection modal
+document.getElementById('print-report-btn').addEventListener('click', () => {
+  if (!currentAuditId) return;
+  openModal('brand-modal');
+});
+
+// Brand modal: clicking a card immediately opens the branded printable report
+document.querySelectorAll('#brand-modal .brand-option-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const brand = card.dataset.brand;
+    closeModal('brand-modal');
+    window.open(`/api/audit/${currentAuditId}/report?brand=${encodeURIComponent(brand)}&autoprint=true`, '_blank');
+  });
+});
+
+document.getElementById('brand-modal-close').addEventListener('click', () => closeModal('brand-modal'));
+
+// Email Report button — opens email modal
+document.getElementById('email-report-btn').addEventListener('click', () => {
+  if (!currentAuditId) return;
+  document.getElementById('email-addresses').value = '';
+  // Pre-select Planeteria
+  document.querySelectorAll('#email-modal .brand-option-card').forEach((c, i) => {
+    c.classList.toggle('selected', i === 0);
+  });
+  openModal('email-modal');
+});
+
+document.getElementById('email-modal-close').addEventListener('click', () => closeModal('email-modal'));
+document.getElementById('email-cancel-btn').addEventListener('click', () => closeModal('email-modal'));
+
+// Brand selection inside email modal
+document.querySelectorAll('#email-modal .brand-option-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('#email-modal .brand-option-card').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+  });
+});
+
+// Send email
+document.getElementById('email-send-btn').addEventListener('click', async () => {
+  const rawInput = document.getElementById('email-addresses').value.trim();
+  if (!rawInput) {
+    alert('Please enter at least one email address.');
+    return;
+  }
+  const emails = rawInput.split(',').map(e => e.trim()).filter(Boolean);
+  const selectedCard = document.querySelector('#email-modal .brand-option-card.selected');
+  const brand = selectedCard?.dataset.brand || 'planeteria';
+
+  const btn = document.getElementById('email-send-btn');
+  const originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Generating PDF & Sending…';
+
+  try {
+    const res = await fetch(`/api/audit/${currentAuditId}/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emails, brand }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to send email');
+    closeModal('email-modal');
+    showToast(`Report sent to ${emails.length} recipient${emails.length !== 1 ? 's' : ''}`);
+  } catch (err) {
+    alert(`Error: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
+});
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeModal(overlay.id);
+  });
+});
+
+// Close modals on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    ['brand-modal', 'email-modal'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.style.display !== 'none') closeModal(id);
+    });
+  }
+});
+
+// ===================== MODAL UTILITIES =====================
+
+function openModal(id) {
+  document.getElementById(id).style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal(id) {
+  document.getElementById(id).style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function showToast(message, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast-notification toast-${type}`;
+  el.textContent = message;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
 // ===================== TOPBAR BRAND =====================
 
-const PLANETERIA_LOGO_SM = `<svg xmlns="http://www.w3.org/2000/svg" width="110" height="16" viewBox="0 0 214 32" fill="none" aria-label="Planeteria Media">
-  <g clip-path="url(#clip_tb)">
-    <path d="M6.63207 6.89503L9.4547 8.48009L21.6414 15.308V8.57153L6.46747 0L0.572266 3.49934L0.578362 3.50543L6.63207 6.89503Z" fill="url(#pg0_tb)"/>
-    <path d="M15.6975 11.9854L8.85742 15.881V22.2212L21.6355 15.308H21.6415L9.45487 8.47998L15.6975 11.9854Z" fill="url(#pg1_tb)"/>
-    <path d="M6.62988 6.89497L0.576172 3.50537V31.9999L6.62988 28.842V6.89497Z" fill="url(#pg2_tb)"/>
-    <path d="M44.86 14.16C44.86 14.72 44.76 15.19 44.55 15.57C44.35 15.95 44.07 16.26 43.72 16.49C43.37 16.72 42.96 16.89 42.51 17C42.05 17.11 41.57 17.17 41.08 17.17H39.94V20.76H37.64V11.23H41.14C41.66 11.23 42.15 11.28 42.6 11.39C43.06 11.49 43.44 11.66 43.78 11.89C44.12 12.12 44.39 12.41 44.58 12.79C44.76 13.16 44.86 13.62 44.86 14.16ZM42.56 14.18C42.56 13.95 42.52 13.77 42.43 13.62C42.34 13.47 42.22 13.37 42.06 13.28C41.91 13.2 41.74 13.15 41.54 13.12C41.35 13.09 41.15 13.08 40.94 13.08H39.93V15.32H40.9C41.12 15.32 41.33 15.3 41.52 15.27C41.72 15.24 41.9 15.17 42.05 15.08C42.21 14.99 42.34 14.87 42.43 14.72C42.51 14.58 42.56 14.4 42.56 14.18Z" fill="#074F8B"/>
-    <path d="M61.02 11.23V20.76H58.72V11.23H61.02Z" fill="#074F8B"/>
-    <path d="M71.36 18.88V20.76H63.89V11.23H71.24V13.11H66.2V14.99H70.72V16.77H66.2V18.88H71.36Z" fill="#074F8B"/>
-    <path d="M82.28 20.76H80.32L75.71 14.63V20.76H73.51V11.23H75.64L80.1 17.22V11.23H82.28V20.76Z" fill="#074F8B"/>
-    <path d="M89.43 13.11H86.64V20.76H84.34V13.11H81.54V11.23H89.43V13.11Z" fill="#074F8B"/>
-    <path d="M109.69 18.88V20.76H102.22V11.23H109.57V13.11H104.52V14.99H109.05V16.77H104.52V18.88H109.69Z" fill="#074F8B"/>
-    <path d="M135.89 11.23V20.76H133.59V11.23H135.89Z" fill="#074F8B"/>
-    <path d="M172.83 20.76H165.36V11.23H172.71V13.11H167.67V14.99H172.19V16.77H167.67V18.88H172.83V20.76Z" fill="#074F8B"/>
-    <path d="M184.08 20.76H182.12L177.52 14.63V20.76H175.32V11.23H177.44L181.91 17.22V11.23H184.08V20.76Z" fill="#074F8B"/>
-    <path d="M213.71 20.76H211.28L208.76 16.72L206.21 20.76H203.86L207.66 15.7L204.04 11.23H206.46L208.8 14.92L211.12 11.23H213.47L209.86 15.69L213.71 20.76Z" fill="#074F8B"/>
-  </g>
-  <defs>
-    <linearGradient id="pg0_tb" x1="3.34" y1="1.08" x2="25.05" y2="14.94" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#63CAE2"/><stop offset="1" stop-color="#107DC2"/>
-    </linearGradient>
-    <linearGradient id="pg1_tb" x1="7.39" y1="16.28" x2="16.24" y2="11.61" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#63CAE2"/><stop offset="1" stop-color="#107DC2"/>
-    </linearGradient>
-    <linearGradient id="pg2_tb" x1="2.84" y1="29.79" x2="4.25" y2="4.59" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#63CAE2"/><stop offset="1" stop-color="#107DC2"/>
-    </linearGradient>
-    <clipPath id="clip_tb"><rect width="213.714" height="32" fill="white"/></clipPath>
-  </defs>
-</svg>`;
+const PLANETERIA_LOGO_SM = `<img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria Logo" class="logo-img">`;
 
 function renderTopbarBrand(el) {
   if (!el) return;
