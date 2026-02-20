@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADA Accessibility Auditor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ======================== LANDING VIEW ======================== -->
+  <div id="view-landing" class="view active">
+    <div class="landing-bg"></div>
+    <div class="landing-container">
+      <div class="landing-header">
+        <div class="brand">
+          <svg class="brand-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
+            <circle cx="20" cy="20" r="20" fill="#6366f1"/>
+            <path d="M20 8a12 12 0 100 24A12 12 0 0020 8zm0 4a8 8 0 110 16 8 8 0 010-16z" fill="white" opacity="0.3"/>
+            <circle cx="20" cy="20" r="5" fill="white"/>
+            <path d="M20 12v2M20 26v2M12 20h2M26 20h2" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <div>
+            <h1>ADA Accessibility Auditor</h1>
+            <p class="brand-sub">Powered by Google Lighthouse</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="landing-card">
+        <h2>Audit your website for accessibility</h2>
+        <p class="landing-desc">Enter a URL to crawl all pages and generate a comprehensive ADA / WCAG accessibility report.</p>
+
+        <form id="audit-form">
+          <div class="url-input-wrap">
+            <svg class="url-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+            </svg>
+            <input type="url" id="url-input" placeholder="https://example.com" required
+              autocomplete="url" spellcheck="false">
+          </div>
+
+          <div class="options-row">
+            <label class="option-label">
+              <span>Max pages to scan</span>
+              <div class="slider-wrap">
+                <input type="range" id="max-pages-input" min="1" max="200" value="50">
+                <span id="max-pages-display" class="slider-value">50</span>
+              </div>
+            </label>
+          </div>
+
+          <button type="submit" class="btn-primary btn-large" id="start-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
+            Start Accessibility Audit
+          </button>
+        </form>
+      </div>
+
+      <!-- Recent Audits -->
+      <div id="recent-audits" class="recent-audits" style="display:none">
+        <h3>Recent Audits</h3>
+        <div id="recent-list"></div>
+      </div>
+
+      <div class="landing-features">
+        <div class="feature">
+          <span class="feature-icon">🔍</span>
+          <strong>Full Site Crawl</strong>
+          <span>Automatically discovers and tests all pages</span>
+        </div>
+        <div class="feature">
+          <span class="feature-icon">📊</span>
+          <strong>WCAG Compliance</strong>
+          <span>Tests against WCAG 2.1 A/AA guidelines</span>
+        </div>
+        <div class="feature">
+          <span class="feature-icon">📄</span>
+          <strong>Downloadable Report</strong>
+          <span>Export a printable HTML/PDF report</span>
+        </div>
+        <div class="feature">
+          <span class="feature-icon">⚡</span>
+          <strong>Real-time Progress</strong>
+          <span>Watch results stream in as pages are scanned</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== PROGRESS VIEW ======================== -->
+  <div id="view-progress" class="view">
+    <div class="topbar">
+      <div class="topbar-inner">
+        <div class="brand-small">
+          <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+            <circle cx="20" cy="20" r="20" fill="#6366f1"/>
+            <circle cx="20" cy="20" r="5" fill="white"/>
+          </svg>
+          <span>ADA Auditor</span>
+        </div>
+        <div id="progress-site-url" class="topbar-url"></div>
+        <button id="cancel-btn" class="btn-ghost btn-sm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+          Cancel
+        </button>
+      </div>
+    </div>
+
+    <div class="progress-container">
+      <div class="progress-status-card">
+        <div id="progress-phase-icon" class="phase-icon phase-crawling">
+          <div class="spinner"></div>
+        </div>
+        <div class="progress-text">
+          <div id="progress-phase-label" class="phase-label">Discovering pages...</div>
+          <div id="progress-current-url" class="progress-current-url"></div>
+        </div>
+      </div>
+
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-track">
+          <div id="progress-bar-fill" class="progress-bar-fill" style="width:0%"></div>
+        </div>
+        <div id="progress-counts" class="progress-counts">0 / 0 pages audited</div>
+      </div>
+
+      <div id="progress-page-list" class="progress-page-list"></div>
+    </div>
+  </div>
+
+  <!-- ======================== RESULTS VIEW ======================== -->
+  <div id="view-results" class="view">
+    <div class="topbar">
+      <div class="topbar-inner">
+        <button id="new-audit-btn" class="btn-ghost btn-sm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 12H5M12 5l-7 7 7 7"/>
+          </svg>
+          New Audit
+        </button>
+        <div id="results-site-url" class="topbar-url"></div>
+        <button id="download-report-btn" class="btn-primary btn-sm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download Report
+        </button>
+      </div>
+    </div>
+
+    <!-- Summary Banner -->
+    <div class="summary-banner">
+      <div class="summary-inner">
+        <div class="score-gauge-wrap">
+          <canvas id="score-canvas" width="120" height="120"></canvas>
+          <div class="score-label">Overall Score</div>
+        </div>
+        <div class="summary-stats">
+          <div class="stat-block">
+            <div id="stat-pages" class="stat-value">—</div>
+            <div class="stat-label">Pages Audited</div>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-block">
+            <div id="stat-issues" class="stat-value">—</div>
+            <div class="stat-label">Total Issues</div>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-block severity-block">
+            <div class="sev-row"><span class="sev-dot critical"></span><span id="stat-critical">0</span> Critical</div>
+            <div class="sev-row"><span class="sev-dot serious"></span><span id="stat-serious">0</span> Serious</div>
+            <div class="sev-row"><span class="sev-dot moderate"></span><span id="stat-moderate">0</span> Moderate</div>
+            <div class="sev-row"><span class="sev-dot minor"></span><span id="stat-minor">0</span> Minor</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Panels -->
+    <div class="results-layout">
+      <!-- Left: Page List -->
+      <div class="pages-panel">
+        <div class="panel-header">
+          <h3>Pages <span id="page-count-badge" class="badge"></span></h3>
+          <div class="sort-controls">
+            <select id="sort-select" class="sort-select">
+              <option value="score-asc">Score: Low to High</option>
+              <option value="score-desc">Score: High to Low</option>
+              <option value="issues-desc">Most Issues</option>
+              <option value="alpha">Alphabetical</option>
+            </select>
+          </div>
+        </div>
+        <div id="pages-list" class="pages-list"></div>
+      </div>
+
+      <!-- Right: Issues Panel -->
+      <div class="issues-panel" id="issues-panel">
+        <div class="issues-placeholder" id="issues-placeholder">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#cbd5e1" stroke-width="1.5">
+            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+          </svg>
+          <p>Select a page to view its accessibility issues</p>
+        </div>
+        <div id="issues-content" style="display:none">
+          <div class="issues-header">
+            <div id="issue-page-url" class="issue-page-url"></div>
+            <div id="issue-page-score" class="issue-page-score-wrap"></div>
+          </div>
+          <div id="issue-filter-bar" class="filter-bar">
+            <button class="filter-btn active" data-severity="all">All</button>
+            <button class="filter-btn" data-severity="critical">Critical</button>
+            <button class="filter-btn" data-severity="serious">Serious</button>
+            <button class="filter-btn" data-severity="moderate">Moderate</button>
+            <button class="filter-btn" data-severity="minor">Minor</button>
+          </div>
+          <div id="issues-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: ada-accessibility-auditor
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
