@@ -41,13 +41,28 @@ export async function startAudit(session, onUpdate) {
       onUpdate({ currentPage: pageUrl });
 
       let pageResult;
-      try {
-        pageResult = await runLighthouseAudit(pageUrl, browser);
-      } catch (error) {
+      // Retry once on failure — transient Chrome issues, slow-loading SPA pages,
+      // and tabs left dirty from a previous error can all cause false failures.
+      let lastError;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          pageResult = await runLighthouseAudit(pageUrl, browser);
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) {
+            // Give Chrome 4 s to settle before retrying
+            await new Promise(r => setTimeout(r, 4000));
+          }
+        }
+      }
+
+      if (lastError) {
         pageResult = {
           url: pageUrl,
           status: 'error',
-          error: error.message,
+          error: lastError.message,
           score: null,
           issues: [],
           issueCount: 0,

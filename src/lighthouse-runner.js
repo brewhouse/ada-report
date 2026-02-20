@@ -136,24 +136,39 @@ export async function runLighthouseAudit(url, browser) {
       },
       throttlingMethod: 'provided',
       disableFullPageScreenshot: true,
+      maxWaitForLoad: 60000, // 60 s — allow slow/SPA pages to finish loading
     });
   } catch (err) {
     throw new Error(`Lighthouse failed for ${url}: ${err.message}`);
+  } finally {
+    // Always close extra tabs — even when Lighthouse throws — so the browser
+    // stays clean for the next page.
+    try {
+      const openPages = await browser.pages();
+      for (const page of openPages) {
+        const pageUrl = page.url();
+        if (pageUrl !== 'about:blank' && pageUrl !== '') {
+          await page.close().catch(() => {});
+        }
+      }
+    } catch {}
   }
 
-  // Clean up extra tabs Lighthouse may have opened
-  try {
-    const pages = await browser.pages();
-    for (const page of pages) {
-      const pageUrl = page.url();
-      if (pageUrl !== 'about:blank' && pageUrl !== '') {
-        await page.close().catch(() => {});
-      }
-    }
-  } catch {}
-
   const lhr = result.lhr;
-  const score = Math.round((lhr.categories?.accessibility?.score ?? 0) * 100);
+  const rawScore = lhr.categories?.accessibility?.score;
+
+  // A null score means Lighthouse ran but couldn't evaluate the page
+  // (typically a React/SPA page whose API calls never settled, or a login-
+  // gated page that rendered empty). Treat it as an auditable error rather
+  // than silently reporting 0.
+  if (rawScore === null || rawScore === undefined) {
+    throw new Error(
+      'Lighthouse returned no accessibility score — the page may not have fully rendered ' +
+      '(JavaScript-heavy page whose API calls did not complete in time, or the page requires login).'
+    );
+  }
+
+  const score = Math.round(rawScore * 100);
   const auditRefs = lhr.categories?.accessibility?.auditRefs ?? [];
   const issues = [];
 
