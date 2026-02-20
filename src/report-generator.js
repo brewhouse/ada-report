@@ -119,10 +119,6 @@ export function generateReport(session, brandKey = null, autoprint = false) {
   const auditDate = new Date(startTime).toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
-  const auditTime = endTime
-    ? ((new Date(endTime) - new Date(startTime)) / 1000 / 60).toFixed(1)
-    : 'N/A';
-
   const completedPages = pages.filter(p => p.status === 'completed');
   const sortedPages = [...completedPages].sort((a, b) => (a.score ?? 101) - (b.score ?? 101));
 
@@ -146,6 +142,9 @@ export function generateReport(session, brandKey = null, autoprint = false) {
 
   const avgScore = summary?.averageScore ?? 0;
   const avgColor = scoreColor(avgScore);
+
+  const pagesNoIssues = completedPages.filter(p => !p.issues || p.issues.length === 0).length;
+  const pagesBelowScore90 = completedPages.filter(p => p.score !== null && p.score !== undefined && p.score < 90).length;
 
   // Cover: brand logo or fallback text
   const coverLogo = brand
@@ -173,7 +172,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     .cover .site-url { font-size: 15px; color: ${accentColor}; margin-bottom: 4px; }
     .cover .meta { font-size: 12px; color: #64748b; margin-bottom: 16px; }
     .cover .score-wrap { display: inline-block; margin: 12px auto; }
-    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
+    .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 10px 0; }
     .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; text-align: center; }
     .stat-card .value { font-size: 22px; font-weight: 700; }
     .stat-card .label { font-size: 11px; color: #64748b; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -235,8 +234,12 @@ export function generateReport(session, brandKey = null, autoprint = false) {
         <div class="label">Total Issues</div>
       </div>
       <div class="stat-card">
-        <div class="value">${auditTime} min</div>
-        <div class="label">Audit Duration</div>
+        <div class="value" style="color:#16a34a">${pagesNoIssues}</div>
+        <div class="label">Pages No Issues</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" style="color:#dc2626">${pagesBelowScore90}</div>
+        <div class="label">Pages Score &lt;90</div>
       </div>
     </div>
 

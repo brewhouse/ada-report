@@ -5,22 +5,30 @@ export async function startAudit(session, onUpdate) {
   let browser;
 
   try {
-    // Phase 1: Crawl
-    onUpdate({ status: 'crawling', progress: { crawled: 0, total: 0, audited: 0 } });
+    let pages;
 
-    const pages = await crawlWebsite(session.url, session.maxPages, (count) => {
-      onUpdate({ progress: { crawled: count, total: count, audited: 0 } });
-    });
+    if (session.maxPages === 1) {
+      // Single-page mode: skip crawl entirely, audit only the given URL
+      pages = [session.url];
+      onUpdate({ status: 'auditing', crawledUrls: pages, progress: { crawled: 1, total: 1, audited: 0 } });
+    } else {
+      // Phase 1: Crawl
+      onUpdate({ status: 'crawling', progress: { crawled: 0, total: 0, audited: 0 } });
 
-    if (pages.length === 0) {
-      throw new Error('No pages found to audit. The site may be inaccessible or block crawlers.');
+      pages = await crawlWebsite(session.url, session.maxPages, (count) => {
+        onUpdate({ progress: { crawled: count, total: count, audited: 0 } });
+      });
+
+      if (pages.length === 0) {
+        throw new Error('No pages found to audit. The site may be inaccessible or block crawlers.');
+      }
+
+      onUpdate({
+        status: 'auditing',
+        crawledUrls: pages,
+        progress: { crawled: pages.length, total: pages.length, audited: 0 },
+      });
     }
-
-    onUpdate({
-      status: 'auditing',
-      crawledUrls: pages,
-      progress: { crawled: pages.length, total: pages.length, audited: 0 },
-    });
 
     // Phase 2: Launch browser
     browser = await launchBrowser();
