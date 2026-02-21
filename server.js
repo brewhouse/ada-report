@@ -189,6 +189,7 @@ async function generatePdfBuffer(htmlContent) {
       format: 'A4',
       landscape: false,
       printBackground: true,
+      displayHeaderFooter: false,
       margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
     });
   } finally {

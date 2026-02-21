@@ -494,13 +494,10 @@ document.getElementById('sort-select').addEventListener('change', (e) => {
   if (currentSession) renderPagesList(currentSession.pages);
 });
 
-// New Audit button
+// New Audit button — navigate to root so state is fully reset
 document.getElementById('new-audit-btn').addEventListener('click', () => {
-  if (ws) { try { ws.close(); } catch {} ws = null; }
-  currentAuditId = null;
-  currentSession = null;
-  selectedPageUrl = null;
-  initLanding();
+  if (ws) { try { ws.close(); } catch {} }
+  window.location.href = '/';
 });
 
 // Download HTML button

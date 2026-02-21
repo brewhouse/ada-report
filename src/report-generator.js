@@ -82,24 +82,24 @@ function renderIssuesTable(issues) {
     return '<p style="color:#64748b;font-style:italic;">No accessibility issues detected.</p>';
   }
   return issues.map(issue => `
-    <div style="margin-bottom:16px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
-        <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;background:${SEVERITY_BG[issue.severity]};color:${SEVERITY_COLORS[issue.severity]}">${escapeHtml(issue.severity)}</span>
-        <strong style="font-size:14px;color:#1e293b;">${escapeHtml(issue.title)}</strong>
-        <span style="margin-left:auto;font-size:12px;color:#64748b;">WCAG ${escapeHtml(issue.wcag)} (${escapeHtml(issue.wcagLevel)})</span>
-        ${issue.count > 1 ? `<span style="font-size:12px;color:#64748b;">${issue.count} elements</span>` : ''}
+    <div style="margin-bottom:5px;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+        <span style="display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;background:${SEVERITY_BG[issue.severity]};color:${SEVERITY_COLORS[issue.severity]}">${escapeHtml(issue.severity)}</span>
+        <strong style="font-size:12px;color:#1e293b;">${escapeHtml(issue.title)}</strong>
+        <span style="margin-left:auto;font-size:10px;color:#64748b;">WCAG ${escapeHtml(issue.wcag)} (${escapeHtml(issue.wcagLevel)})</span>
+        ${issue.count > 1 ? `<span style="font-size:10px;color:#64748b;">${issue.count} elements</span>` : ''}
       </div>
-      <div style="padding:10px 14px;">
-        <p style="margin:0 0 8px;font-size:13px;color:#475569;">${escapeHtml(issue.description)}</p>
+      <div style="padding:5px 10px;">
+        <p style="margin:0 0 4px;font-size:11px;color:#475569;">${escapeHtml(issue.description)}</p>
         ${issue.elements && issue.elements.length > 0 ? `
-          <div style="margin-top:8px;">
+          <div style="margin-top:4px;">
             ${issue.elements.slice(0, 3).map(el => `
-              <div style="margin-bottom:6px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px;">
-                <code style="font-size:11px;color:#475569;word-break:break-all;">${escapeHtml(el.snippet || el.selector)}</code>
-                ${el.explanation ? `<div style="font-size:11px;color:#64748b;margin-top:2px;">${escapeHtml(el.explanation)}</div>` : ''}
+              <div style="margin-bottom:3px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;padding:3px 8px;">
+                <code style="font-size:10px;color:#475569;word-break:break-all;">${escapeHtml(el.snippet || el.selector)}</code>
+                ${el.explanation ? `<div style="font-size:10px;color:#64748b;margin-top:1px;">${escapeHtml(el.explanation)}</div>` : ''}
               </div>
             `).join('')}
-            ${issue.elements.length > 3 ? `<p style="font-size:12px;color:#94a3b8;margin:4px 0 0;">...and ${issue.elements.length - 3} more elements</p>` : ''}
+            ${issue.elements.length > 3 ? `<p style="font-size:10px;color:#94a3b8;margin:2px 0 0;">...and ${issue.elements.length - 3} more elements</p>` : ''}
           </div>
         ` : ''}
       </div>
@@ -160,42 +160,48 @@ export function generateReport(session, brandKey = null, autoprint = false) {
   <style>
     @page { size: A4 portrait; margin: 10mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #1e293b; background: #fff; line-height: 1.45; }
-    .page { max-width: 900px; margin: 0 auto; padding: 20px 24px; }
-    h1 { font-size: 24px; font-weight: 700; color: #0f172a; }
-    h2 { font-size: 17px; font-weight: 700; color: #0f172a; margin: 18px 0 10px; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px; }
-    h3 { font-size: 14px; font-weight: 600; color: #1e293b; margin: 12px 0 6px; }
-    .cover { text-align: center; padding: 28px 0 20px; border-bottom: 3px solid ${accentColor}; margin-bottom: 20px; }
-    .cover-logo { max-height: 48px; max-width: 200px; object-fit: contain; margin: 0 auto 16px; display: block; }
-    .cover .logo-text { font-size: 12px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: ${accentColor}; margin-bottom: 14px; }
-    .cover h1 { font-size: 26px; margin-bottom: 6px; }
-    .cover .site-url { font-size: 15px; color: ${accentColor}; margin-bottom: 4px; }
-    .cover .meta { font-size: 12px; color: #64748b; margin-bottom: 16px; }
-    .cover .score-wrap { display: inline-block; margin: 12px auto; }
-    .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 10px 0; }
-    .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; text-align: center; }
-    .stat-card .value { font-size: 22px; font-weight: 700; }
-    .stat-card .label { font-size: 11px; color: #64748b; margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .severity-bar { display: flex; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
-    .sev-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
-    .sev-dot { width: 10px; height: 10px; border-radius: 50%; }
-    .score-dist { display: flex; gap: 6px; margin: 8px 0; align-items: center; }
-    .dist-bar { height: 20px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 28px; padding: 0 6px; }
-    .issues-summary table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .issues-summary th { background: #f8fafc; padding: 6px 10px; text-align: left; border: 1px solid #e2e8f0; font-weight: 600; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .issues-summary td { padding: 6px 10px; border: 1px solid #e2e8f0; vertical-align: top; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1e293b; background: #fff; line-height: 1.4; }
+    .page { max-width: 900px; margin: 0 auto; padding: 10px 16px; }
+    h2 { font-size: 14px; font-weight: 700; color: #0f172a; margin: 8px 0 5px; border-bottom: 2px solid #e2e8f0; padding-bottom: 3px; }
+    h3 { font-size: 12px; font-weight: 600; color: #1e293b; margin: 6px 0 3px; }
+    .cover { text-align: center; padding: 14px 0 10px; border-bottom: 3px solid ${accentColor}; margin-bottom: 10px; }
+    .cover-logo { max-height: 40px; max-width: 180px; object-fit: contain; margin: 0 auto 8px; display: block; }
+    .cover .logo-text { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: ${accentColor}; margin-bottom: 8px; }
+    .cover-title { font-size: 20px; font-weight: 700; color: #0f172a; padding: 6px 24px; display: inline-block; }
+    .cover-site { display: block; font-size: 14px; font-weight: 400; color: ${accentColor}; margin-top: 3px; }
+    .cover .meta { font-size: 11px; color: #64748b; margin: 6px 0 8px; }
+    .cover .score-wrap { display: inline-block; margin: 6px auto 0; }
+    .cover .score-label { font-size: 11px; color: #64748b; margin-top: 4px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; margin: 5px 0; }
+    .stat-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 5px 6px; text-align: center; }
+    .stat-card .value { font-size: 17px; font-weight: 700; }
+    .stat-card .label { font-size: 9px; color: #64748b; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .severity-bar { display: flex; gap: 14px; margin: 3px 0; flex-wrap: wrap; }
+    .sev-item { display: flex; align-items: center; gap: 5px; font-size: 11px; }
+    .sev-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .score-dist-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 4px 0; }
+    .sd-cell { padding: 7px 6px; text-align: center; border-radius: 4px; }
+    .sd-cell .sd-count { display: block; font-size: 20px; font-weight: 700; line-height: 1; }
+    .sd-cell .sd-label { display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 3px; }
+    .sd-green { background: #f0fdf4; color: #16a34a; }
+    .sd-lime { background: #f7fee7; color: #65a30d; }
+    .sd-amber { background: #fffbeb; color: #d97706; }
+    .sd-red { background: #fef2f2; color: #dc2626; }
+    .issues-summary table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .issues-summary th { background: #f8fafc; padding: 4px 8px; text-align: left; border: 1px solid #e2e8f0; font-weight: 600; color: #475569; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .issues-summary td { padding: 4px 8px; border: 1px solid #e2e8f0; vertical-align: top; }
     .issues-summary tr:nth-child(even) td { background: #f8fafc; }
-    .sev-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
-    .page-section { margin-bottom: 10px; page-break-inside: avoid; }
-    .page-header { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 6px; }
-    .page-header.has-issues { margin-bottom: 8px; }
-    .page-url { font-size: 12px; font-weight: 600; word-break: break-all; flex: 1; }
-    .page-score-badge { font-size: 15px; font-weight: 700; padding: 3px 9px; border-radius: 5px; white-space: nowrap; flex-shrink: 0; }
-    .no-issues-inline { margin-left: auto; font-size: 12px; color: #16a34a; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
-    .issue-count-label { margin-left: auto; font-size: 12px; color: #64748b; white-space: nowrap; flex-shrink: 0; }
+    .sev-badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+    .page-section { margin-bottom: 5px; page-break-inside: avoid; }
+    .page-header { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 5px; }
+    .page-header.has-issues { margin-bottom: 3px; }
+    .page-url { font-size: 11px; font-weight: 600; word-break: break-all; flex: 1; }
+    .page-score-badge { font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
+    .no-issues-inline { margin-left: auto; font-size: 11px; color: #16a34a; font-weight: 600; white-space: nowrap; flex-shrink: 0; }
+    .issue-count-label { margin-left: auto; font-size: 11px; color: #64748b; white-space: nowrap; flex-shrink: 0; }
     .print-btn { position: fixed; top: 16px; right: 16px; background: ${accentColor}; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
     .print-btn:hover { opacity: 0.9; }
-    .footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 11px; color: #94a3b8; }
+    .footer { margin-top: 10px; padding-top: 6px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 10px; color: #94a3b8; }
     @media print {
       .print-btn { display: none; }
       .page { padding: 0; }
@@ -211,11 +217,10 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     <!-- Cover -->
     <div class="cover">
       ${coverLogo}
-      <h1>Accessibility Audit Report</h1>
-      <div class="site-url">${escapeHtml(url)}</div>
+      <div class="cover-title">ADA Accessibility Report<span class="cover-site">${escapeHtml(url)}</span></div>
       <div class="meta">Audited on ${auditDate} &bull; Powered by Google Lighthouse</div>
-      <div class="score-wrap">${scoreGaugeSvg(avgScore, 140)}</div>
-      <div style="font-size:14px;color:#64748b;margin-top:8px;">Overall Accessibility Score</div>
+      <div class="score-wrap">${scoreGaugeSvg(avgScore, 120)}</div>
+      <div class="score-label">Overall Accessibility Score</div>
     </div>
 
     <!-- Executive Summary -->
@@ -252,11 +257,11 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     </div>
 
     <h3>Score Distribution</h3>
-    <div class="score-dist">
-      ${summary?.pagesAbove90 ? `<div class="dist-bar" style="background:#16a34a;width:${Math.max(summary.pagesAbove90 * 30, 40)}px">${summary.pagesAbove90} pages ≥90</div>` : ''}
-      ${summary?.pages70to89 ? `<div class="dist-bar" style="background:#65a30d;width:${Math.max(summary.pages70to89 * 30, 40)}px">${summary.pages70to89} pages 70–89</div>` : ''}
-      ${summary?.pages50to69 ? `<div class="dist-bar" style="background:#d97706;width:${Math.max(summary.pages50to69 * 30, 40)}px">${summary.pages50to69} pages 50–69</div>` : ''}
-      ${summary?.pagesBelow50 ? `<div class="dist-bar" style="background:#dc2626;width:${Math.max(summary.pagesBelow50 * 30, 40)}px">${summary.pagesBelow50} pages &lt;50</div>` : ''}
+    <div class="score-dist-grid">
+      <div class="sd-cell sd-green"><span class="sd-count">${summary?.pagesAbove90 ?? 0}</span><span class="sd-label">Score ≥90</span></div>
+      <div class="sd-cell sd-lime"><span class="sd-count">${summary?.pages70to89 ?? 0}</span><span class="sd-label">Score 70–89</span></div>
+      <div class="sd-cell sd-amber"><span class="sd-count">${summary?.pages50to69 ?? 0}</span><span class="sd-label">Score 50–69</span></div>
+      <div class="sd-cell sd-red"><span class="sd-count">${summary?.pagesBelow50 ?? 0}</span><span class="sd-label">Score &lt;50</span></div>
     </div>
 
     <!-- Top Issues -->
@@ -325,8 +330,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     ` : ''}
 
     <div class="footer">
-      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse<br>
-      ${escapeHtml(url)} &bull; ${auditDate}
+      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse &bull; ${auditDate}
     </div>
   </div>
   ${autoprint ? `<script>window.addEventListener('load', function(){ setTimeout(window.print, 900); });</script>` : ''}
