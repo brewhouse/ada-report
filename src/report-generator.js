@@ -114,7 +114,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
   const accentColor = brand?.accentColor || '#107DC2';
   const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
 
-  const { url, summary, pages, startTime, endTime } = session;
+  const { url, summary, pages, startTime } = session;
   const hostname = new URL(url).hostname;
   const auditDate = new Date(startTime).toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -158,7 +158,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ADA Accessibility Report – ${escapeHtml(hostname)}</title>
   <style>
-    @page { size: A4 portrait; margin: 10mm; }
+    @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1e293b; background: #fff; line-height: 1.4; }
     .page { max-width: 900px; margin: 0 auto; padding: 10px 16px; }
@@ -167,7 +167,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     .cover { text-align: center; padding: 14px 0 10px; border-bottom: 3px solid ${accentColor}; margin-bottom: 10px; }
     .cover-logo { max-height: 40px; max-width: 180px; object-fit: contain; margin: 0 auto 8px; display: block; }
     .cover .logo-text { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: ${accentColor}; margin-bottom: 8px; }
-    .cover-title { font-size: 20px; font-weight: 700; color: #0f172a; padding: 6px 24px; display: inline-block; }
+    .cover-title { font-size: 20px; font-weight: 700; color: #0f172a; padding: 14px 24px 10px; display: inline-block; }
     .cover-site { display: block; font-size: 14px; font-weight: 400; color: ${accentColor}; margin-top: 3px; }
     .cover .meta { font-size: 11px; color: #64748b; margin: 6px 0 8px; }
     .cover .score-wrap { display: inline-block; margin: 6px auto 0; }
@@ -201,10 +201,10 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     .issue-count-label { margin-left: auto; font-size: 11px; color: #64748b; white-space: nowrap; flex-shrink: 0; }
     .print-btn { position: fixed; top: 16px; right: 16px; background: ${accentColor}; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
     .print-btn:hover { opacity: 0.9; }
-    .footer { margin-top: 10px; padding-top: 6px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 10px; color: #94a3b8; }
+    .footer { margin-top: 16px; padding: 14px 0 12px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 10px; color: #94a3b8; }
     @media print {
       .print-btn { display: none; }
-      .page { padding: 0; }
+      .page { padding: 10mm 12mm; }
       .page-section { page-break-inside: avoid; }
       h2 { page-break-after: avoid; }
     }

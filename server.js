@@ -33,7 +33,7 @@ const wsConnections = new Map();
 // Audit queue for rate limiting
 const auditQueue = [];
 let runningAudits = 0;
-const MAX_CONCURRENT_AUDITS = 2;
+const MAX_CONCURRENT_AUDITS = 4;
 
 app.use(cors());
 app.use(express.json());
@@ -146,16 +146,29 @@ function cleanOldSessions() {
   });
 }
 
+const MAX_AUDIT_DURATION_MS = 25 * 60 * 1000; // 25-minute hard cap per audit
+
 async function processAuditQueue() {
   if (runningAudits >= MAX_CONCURRENT_AUDITS || auditQueue.length === 0) return;
   const { session } = auditQueue.shift();
   runningAudits++;
 
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error('Audit timed out after 25 minutes')),
+      MAX_AUDIT_DURATION_MS
+    );
+  });
+
   try {
-    await startAudit(session, (update) => {
-      Object.assign(session, update);
-      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-    });
+    await Promise.race([
+      startAudit(session, (update) => {
+        Object.assign(session, update);
+        broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+      }),
+      timeout,
+    ]);
     await saveSessionToDisk(session);
   } catch (error) {
     session.status = 'error';
@@ -164,6 +177,7 @@ async function processAuditQueue() {
     broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
     await saveSessionToDisk(session);
   } finally {
+    clearTimeout(timeoutId);
     runningAudits--;
     processAuditQueue();
   }
