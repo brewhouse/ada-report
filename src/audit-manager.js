@@ -7,7 +7,11 @@ export async function startAudit(session, onUpdate) {
   try {
     let pages;
 
-    if (session.maxPages === 1) {
+    if (session.urlList && session.urlList.length > 0) {
+      // URL-list mode: audit exactly the provided URLs, no crawling
+      pages = session.urlList;
+      onUpdate({ status: 'auditing', crawledUrls: pages, progress: { crawled: pages.length, total: pages.length, audited: 0 } });
+    } else if (session.maxPages === 1) {
       // Single-page mode: skip crawl entirely, audit only the given URL
       pages = [session.url];
       onUpdate({ status: 'auditing', crawledUrls: pages, progress: { crawled: 1, total: 1, audited: 0 } });

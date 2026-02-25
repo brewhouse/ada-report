@@ -214,23 +214,34 @@ async function generatePdfBuffer(htmlContent) {
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/audit', (req, res) => {
-  const { url, maxPages = 50 } = req.body;
+  const { url, maxPages = 50, urlList } = req.body;
 
-  if (!url) return res.status(400).json({ error: 'URL is required' });
-
-  try {
-    new URL(url);
-  } catch {
-    return res.status(400).json({ error: 'Invalid URL format' });
+  // URL-list mode: validate each entry
+  if (urlList) {
+    if (!Array.isArray(urlList) || urlList.length === 0) {
+      return res.status(400).json({ error: 'urlList must be a non-empty array' });
+    }
+    for (const u of urlList) {
+      try { new URL(u); } catch {
+        return res.status(400).json({ error: `Invalid URL in list: ${u}` });
+      }
+    }
+  } else {
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+    try { new URL(url); } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
   }
 
   cleanOldSessions();
 
+  const resolvedUrl = urlList ? urlList[0] : url;
   const auditId = uuidv4();
   const session = {
     id: auditId,
-    url,
-    maxPages: Math.min(Math.max(1, parseInt(maxPages) || 50), 5000),
+    url: resolvedUrl,
+    urlList: urlList || null,
+    maxPages: urlList ? urlList.length : Math.min(Math.max(1, parseInt(maxPages) || 50), 5000),
     status: 'queued',
     startTime: new Date().toISOString(),
     endTime: null,

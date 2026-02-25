@@ -166,22 +166,61 @@ async function loadExistingAudit(auditId) {
   }
 }
 
+// ===================== AUDIT MODE TOGGLE =====================
+
+let auditMode = 'crawl'; // 'crawl' | 'url-list'
+
+document.getElementById('mode-crawl-btn').addEventListener('click', () => setAuditMode('crawl'));
+document.getElementById('mode-list-btn').addEventListener('click', () => setAuditMode('url-list'));
+
+function setAuditMode(mode) {
+  auditMode = mode;
+  document.getElementById('mode-crawl-btn').classList.toggle('active', mode === 'crawl');
+  document.getElementById('mode-list-btn').classList.toggle('active', mode === 'url-list');
+  document.getElementById('crawl-mode-fields').style.display = mode === 'crawl' ? '' : 'none';
+  document.getElementById('url-list-mode-fields').style.display = mode === 'url-list' ? '' : 'none';
+}
+
+// Live URL count for url-list mode
+document.getElementById('url-list-input').addEventListener('input', () => {
+  const urls = parseUrlList();
+  const el = document.getElementById('url-list-count');
+  el.textContent = urls.length > 0 ? `${urls.length} URL${urls.length !== 1 ? 's' : ''} entered` : '';
+});
+
+function parseUrlList() {
+  return document.getElementById('url-list-input').value
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && (l.startsWith('http://') || l.startsWith('https://')));
+}
+
 // ===================== START AUDIT =====================
 
 document.getElementById('audit-form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const url = document.getElementById('url-input').value.trim();
-  const maxPages = parseInt(document.getElementById('max-pages-input').value);
 
   const btn = document.getElementById('start-btn');
   btn.disabled = true;
   btn.textContent = 'Starting...';
 
   try {
+    let body;
+    if (auditMode === 'url-list') {
+      const urlList = parseUrlList();
+      if (urlList.length === 0) throw new Error('Please enter at least one valid URL (must start with http:// or https://).');
+      body = { urlList };
+    } else {
+      const url = document.getElementById('url-input').value.trim();
+      if (!url) throw new Error('Please enter a website URL.');
+      const maxPages = parseInt(document.getElementById('max-pages-input').value);
+      body = { url, maxPages };
+    }
+
     const res = await fetch('/api/audit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, maxPages }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to start audit');
