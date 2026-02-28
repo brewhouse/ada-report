@@ -491,6 +491,14 @@ a:hover { text-decoration: underline; }
   white-space: nowrap; flex-shrink: 0;
 }
 .page-issue-count { font-size: 11px; color: var(--gray-500); white-space: nowrap; flex-shrink: 0; }
+.rescan-btn {
+  flex-shrink: 0; font-size: 11px; font-weight: 600; cursor: pointer;
+  padding: 2px 8px; border-radius: var(--radius); border: 1px solid #2563eb;
+  color: #2563eb; background: #eff6ff; white-space: nowrap;
+  transition: background 0.15s;
+}
+.rescan-btn:hover { background: #dbeafe; }
+.rescan-scanning-label { font-size: 11px; color: var(--gray-500); font-style: italic; white-space: nowrap; flex-shrink: 0; }
 
 /* Right Panel */
 .issues-panel {

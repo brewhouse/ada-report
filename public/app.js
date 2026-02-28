@@ -380,14 +380,20 @@ function renderPagesList(pages) {
   list.innerHTML = sorted.map(page => {
     const cls = scoreClass(page.score);
     const isError = page.status === 'error';
+    const isRescanning = page.status === 'rescanning';
     const isActive = page.url === selectedPageUrl;
-    return `<div class="page-item ${isError ? 'error-item' : ''} ${isActive ? 'active' : ''}"
+    return `<div class="page-item ${isError || isRescanning ? 'error-item' : ''} ${isActive ? 'active' : ''}"
         data-url="${escapeHtml(page.url)}">
       <span class="page-score-pill ${cls}">
-        ${page.score !== null && page.score !== undefined ? page.score : 'ERR'}
+        ${isRescanning ? '…' : (page.score !== null && page.score !== undefined ? page.score : 'ERR')}
       </span>
       <span class="page-url-text" title="${escapeHtml(page.url)}">${escapeHtml(shortUrl(page.url))}</span>
-      ${!isError ? `<span class="page-issue-count">${page.issueCount} issues</span>` : ''}
+      ${isRescanning
+        ? `<span class="rescan-scanning-label">Scanning…</span>`
+        : isError
+          ? `<button class="rescan-btn" data-url="${escapeHtml(page.url)}" title="Re-audit this page">↺ Rescan</button>`
+          : `<span class="page-issue-count">${page.issueCount} issues</span>`
+      }
     </div>`;
   }).join('');
 
@@ -395,6 +401,13 @@ function renderPagesList(pages) {
     el.addEventListener('click', () => {
       const page = pages.find(p => p.url === el.dataset.url);
       if (page) selectPage(page);
+    });
+  });
+
+  list.querySelectorAll('.rescan-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      rescanSinglePage(btn.dataset.url);
     });
   });
 }
@@ -448,6 +461,24 @@ function selectPage(page) {
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   document.querySelector('.filter-btn[data-severity="all"]').classList.add('active');
   renderIssues(page.issues || []);
+}
+
+async function rescanSinglePage(url) {
+  if (!currentAuditId) return;
+  try {
+    const res = await fetch(`/api/audit/${currentAuditId}/rescan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(`Rescan failed: ${data.error || 'Unknown error'}`);
+    }
+    // UI updates automatically via WebSocket broadcast from the server
+  } catch (err) {
+    showToast(`Rescan error: ${err.message}`);
+  }
 }
 
 function renderIssues(issues) {

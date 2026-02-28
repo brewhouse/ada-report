@@ -1,6 +1,42 @@
 import { crawlWebsite } from './crawler.js';
 import { launchBrowser, runLighthouseAudit } from './lighthouse-runner.js';
 
+// Re-audit a single URL and return the updated page result.
+// Used by the /rescan endpoint to retry a previously errored page.
+export async function rescanPage(url) {
+  const browser = await launchBrowser();
+  try {
+    let pageResult;
+    let lastError;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        pageResult = await runLighthouseAudit(url, browser);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await new Promise(r => setTimeout(r, 4000));
+      }
+    }
+    if (lastError) {
+      return {
+        url,
+        status: 'error',
+        error: lastError.message,
+        score: null,
+        issues: [],
+        issueCount: 0,
+        timestamp: new Date().toISOString(),
+      };
+    }
+    return pageResult;
+  } finally {
+    await browser.close().catch((err) => {
+      if (process.env.DEBUG) console.warn('Browser close error:', err.message);
+    });
+  }
+}
+
 // Number of pages to audit in parallel (each gets its own browser instance)
 const CONCURRENT_PAGES = 4;
 

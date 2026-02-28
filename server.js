@@ -8,7 +8,7 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
-import { startAudit } from './src/audit-manager.js';
+import { startAudit, rescanPage } from './src/audit-manager.js';
 import { generateReport, generateSummaryReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
 
@@ -323,6 +323,80 @@ app.get('/api/audit/:id/report/summary', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="accessibility-summary-${domain}-${date}.html"`);
   }
   res.send(reportHtml);
+});
+
+// Rescan a single page — POST body: { url: string }
+app.post('/api/audit/:id/rescan', async (req, res) => {
+  const session = auditSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+  if (session.status !== 'completed' && session.status !== 'error') {
+    return res.status(400).json({ error: 'Audit must be completed before rescanning individual pages' });
+  }
+
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
+  try { new URL(url); } catch {
+    return res.status(400).json({ error: 'Invalid URL format' });
+  }
+
+  // Mark the page as rescanning so the UI can show a spinner
+  const existingIdx = session.pages.findIndex(p => p.url === url);
+  if (existingIdx >= 0) {
+    session.pages[existingIdx] = { ...session.pages[existingIdx], status: 'rescanning' };
+  }
+  broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+
+  try {
+    const result = await rescanPage(url);
+
+    // Replace or append the page result
+    if (existingIdx >= 0) {
+      session.pages[existingIdx] = result;
+    } else {
+      session.pages.push(result);
+    }
+
+    // Recompute summary
+    const completed = session.pages.filter(p => p.status === 'completed');
+    const scores = completed.map(p => p.score).filter(s => s !== null);
+    const allIssues = completed.flatMap(p => p.issues || []);
+
+    session.summary = {
+      ...session.summary,
+      totalPages: session.pages.length,
+      successfulPages: completed.length,
+      errorPages: session.pages.filter(p => p.status === 'error').length,
+      averageScore: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
+      minScore: scores.length ? Math.min(...scores) : 0,
+      maxScore: scores.length ? Math.max(...scores) : 0,
+      totalIssues: allIssues.length,
+      criticalIssues: allIssues.filter(i => i.severity === 'critical').length,
+      seriousIssues: allIssues.filter(i => i.severity === 'serious').length,
+      moderateIssues: allIssues.filter(i => i.severity === 'moderate').length,
+      minorIssues: allIssues.filter(i => i.severity === 'minor').length,
+      pagesAbove90: scores.filter(s => s >= 90).length,
+      pages70to89: scores.filter(s => s >= 70 && s < 90).length,
+      pages50to69: scores.filter(s => s >= 50 && s < 70).length,
+      pagesBelow50: scores.filter(s => s < 50).length,
+    };
+
+    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    await saveSessionToDisk(session);
+
+    res.json({ success: true, page: result });
+  } catch (err) {
+    console.error('[rescan] Error:', err.message);
+    // Restore page as error if rescan itself threw unexpectedly
+    if (existingIdx >= 0) {
+      session.pages[existingIdx] = {
+        url, status: 'error', error: err.message,
+        score: null, issues: [], issueCount: 0,
+        timestamp: new Date().toISOString(),
+      };
+      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    }
+    res.status(500).json({ error: 'Rescan failed: ' + err.message });
+  }
 });
 
 // Email report — POST body: { emails: string[], brand: string }

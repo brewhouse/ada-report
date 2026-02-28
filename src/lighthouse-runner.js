@@ -136,7 +136,7 @@ export async function runLighthouseAudit(url, browser) {
       },
       throttlingMethod: 'provided',
       disableFullPageScreenshot: true,
-      maxWaitForLoad: 60000, // 60 s — allow slow/SPA pages to finish loading
+      maxWaitForLoad: 120000, // 120 s — allow slow/SPA/gov pages to finish loading
     });
   } catch (err) {
     throw new Error(`Lighthouse failed for ${url}: ${err.message}`);
