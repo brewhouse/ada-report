@@ -545,7 +545,24 @@ document.getElementById('download-report-btn').addEventListener('click', () => {
   window.open(`/api/audit/${currentAuditId}/report`, '_blank');
 });
 
-// Print / Save PDF button — opens brand selection modal
+// Client Summary button — opens summary brand selection modal
+document.getElementById('summary-report-btn').addEventListener('click', () => {
+  if (!currentAuditId) return;
+  openModal('summary-brand-modal');
+});
+
+// Summary brand modal: clicking a card opens the branded summary report
+document.querySelectorAll('#summary-brand-modal .brand-option-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const brand = card.dataset.brand;
+    closeModal('summary-brand-modal');
+    window.open(`/api/audit/${currentAuditId}/report/summary?brand=${encodeURIComponent(brand)}&autoprint=true`, '_blank');
+  });
+});
+
+document.getElementById('summary-brand-modal-close').addEventListener('click', () => closeModal('summary-brand-modal'));
+
+// Detail PDF button — opens brand selection modal
 document.getElementById('print-report-btn').addEventListener('click', () => {
   if (!currentAuditId) return;
   openModal('brand-modal');
