@@ -94,7 +94,7 @@ export async function launchBrowser() {
     process.env.CHROME_PATH || undefined;
 
   const browser = await puppeteer.launch({
-    headless: true,
+    headless: 'new',
     executablePath,
     args: [
       '--no-sandbox',

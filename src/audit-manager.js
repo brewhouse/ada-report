@@ -1,5 +1,36 @@
+import axios from 'axios';
 import { crawlWebsite } from './crawler.js';
 import { launchBrowser, runLighthouseAudit } from './lighthouse-runner.js';
+
+const CHECK_OPTS = {
+  maxRedirects: 0,
+  timeout: 10000,
+  validateStatus: () => true,
+  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' },
+};
+
+// Returns 'redirect', 'not-found', or 'ok'.
+// Uses HEAD first (no body download), falls back to GET if HEAD is unsupported.
+async function checkUrlStatus(url) {
+  for (const method of ['head', 'get']) {
+    let status;
+    try {
+      const res = await axios[method](url, CHECK_OPTS);
+      status = res.status;
+    } catch (err) {
+      status = err.response?.status;
+      if (!status) {
+        if (method === 'get') return 'ok'; // true network error — let Lighthouse try
+        continue; // HEAD failed without a response, try GET
+      }
+    }
+    if (status === 404 || status === 410) return 'not-found';
+    if (status >= 300 && status < 400) return 'redirect';
+    if (status === 405 && method === 'head') continue; // HEAD not allowed, try GET
+    return 'ok';
+  }
+  return 'ok';
+}
 
 // Re-audit a single URL and return the updated page result.
 // Used by the /rescan endpoint to retry a previously errored page.
@@ -46,11 +77,9 @@ export async function startAudit(session, onUpdate) {
   if (session.urlList && session.urlList.length > 0) {
     // URL-list mode: audit exactly the provided URLs, no crawling
     pages = session.urlList;
-    onUpdate({ status: 'auditing', crawledUrls: pages, progress: { crawled: pages.length, total: pages.length, audited: 0 } });
   } else if (session.maxPages === 1) {
     // Single-page mode: skip crawl entirely, audit only the given URL
     pages = [session.url];
-    onUpdate({ status: 'auditing', crawledUrls: pages, progress: { crawled: 1, total: 1, audited: 0 } });
   } else {
     // Phase 1: Crawl
     onUpdate({ status: 'crawling', progress: { crawled: 0, total: 0, audited: 0 } });
@@ -62,13 +91,27 @@ export async function startAudit(session, onUpdate) {
     if (pages.length === 0) {
       throw new Error('No pages found to audit. The site may be inaccessible or block crawlers.');
     }
-
-    onUpdate({
-      status: 'auditing',
-      crawledUrls: pages,
-      progress: { crawled: pages.length, total: pages.length, audited: 0 },
-    });
   }
+
+  // Filter out URLs that redirect to a different location (3xx) or return 404/410.
+  // Run checks in parallel so this step is fast even for large page lists.
+  {
+    const statuses = await Promise.all(pages.map(url => checkUrlStatus(url)));
+    const before = pages.length;
+    pages = pages.filter((_, i) => statuses[i] === 'ok');
+    const skipped = before - pages.length;
+    if (skipped > 0) console.log(`[audit] Skipped ${skipped} URL(s) — redirect or 404`);
+  }
+
+  if (pages.length === 0) {
+    throw new Error('No auditable pages found — all discovered URLs either redirect or return 404.');
+  }
+
+  onUpdate({
+    status: 'auditing',
+    crawledUrls: pages,
+    progress: { crawled: pages.length, total: pages.length, audited: 0 },
+  });
 
   // Phase 2: Launch a pool of browsers for parallel auditing.
   // Launch sequentially so partial failures still get cleaned up in finally.
