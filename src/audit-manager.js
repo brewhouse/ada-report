@@ -2,31 +2,49 @@ import axios from 'axios';
 import { crawlWebsite } from './crawler.js';
 import { launchBrowser, runLighthouseAudit } from './lighthouse-runner.js';
 
-const CHECK_OPTS = {
-  maxRedirects: 0,
-  timeout: 10000,
-  validateStatus: () => true,
-  headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' },
-};
+const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
+
+// Normalize a pathname for comparison: strip trailing slash, lowercase.
+function normPath(pathname) {
+  return (pathname || '/').replace(/\/$/, '').toLowerCase() || '/';
+}
 
 // Returns 'redirect', 'not-found', or 'ok'.
-// Uses HEAD first (no body download), falls back to GET if HEAD is unsupported.
+// Follows redirects (so http→https and www→non-www are transparent) but
+// flags as 'redirect' only when the final path is different from the original
+// — indicating the URL was moved to unrelated content (e.g. redirects to home).
 async function checkUrlStatus(url) {
+  const origPath = normPath(new URL(url).pathname);
+  const opts = {
+    maxRedirects: 5,
+    timeout: 10000,
+    validateStatus: () => true,
+    headers: CHECK_HEADERS,
+  };
+
   for (const method of ['head', 'get']) {
-    let status;
+    let res;
     try {
-      const res = await axios[method](url, CHECK_OPTS);
-      status = res.status;
+      res = await axios[method](url, opts);
     } catch (err) {
-      status = err.response?.status;
-      if (!status) {
-        if (method === 'get') return 'ok'; // true network error — let Lighthouse try
-        continue; // HEAD failed without a response, try GET
-      }
+      if (method === 'get') return 'ok'; // network error — let Lighthouse try
+      continue; // HEAD failed, try GET
     }
+
+    const status = res.status;
     if (status === 404 || status === 410) return 'not-found';
-    if (status >= 300 && status < 400) return 'redirect';
     if (status === 405 && method === 'head') continue; // HEAD not allowed, try GET
+
+    // Detect content-redirect: the server followed redirects and landed on a
+    // different path (e.g. /old-post → /). Protocol and host changes are fine.
+    const finalUrl = res.request?.res?.responseUrl;
+    if (finalUrl) {
+      try {
+        const finalPath = normPath(new URL(finalUrl).pathname);
+        if (finalPath !== origPath) return 'redirect';
+      } catch {}
+    }
+
     return 'ok';
   }
   return 'ok';
