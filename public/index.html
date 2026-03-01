@@ -74,6 +74,21 @@
                 </div>
               </label>
             </div>
+            <div class="exclude-sitemaps-section">
+              <button type="button" class="exclude-toggle-btn" id="exclude-toggle-btn" aria-expanded="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="exclude-toggle-icon">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+                Exclude pages from sitemaps
+              </button>
+              <div id="exclude-sitemaps-fields" style="display:none">
+                <p class="exclude-sitemaps-hint">Enter one sitemap URL per line. Pages listed in these sitemaps will be skipped during the audit.</p>
+                <textarea id="exclude-sitemaps-input" class="url-list-textarea exclude-sitemaps-textarea"
+                  placeholder="https://example.com/events-sitemap.xml&#10;https://example.com/news-sitemap.xml"
+                  rows="4" spellcheck="false"></textarea>
+                <div id="exclude-sitemaps-count" class="url-list-count"></div>
+              </div>
+            </div>
           </div>
 
           <!-- URL list mode inputs -->

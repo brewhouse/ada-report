@@ -168,7 +168,7 @@ async function discoverFromSitemap(rootUrl) {
 
 // ── Puppeteer crawler (fallback for JS-heavy / decoupled sites) ────────────────
 
-async function crawlWithBrowser(rootUrl, maxPages, onProgress) {
+async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = null) {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
   const browser = await puppeteer.launch({
@@ -223,7 +223,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress) {
         const normFinal = normalizeUrl(rootUrl, finalUrl) || url;
         visited.add(normFinal);
 
-        if (!pages.includes(normFinal)) {
+        if (!pages.includes(normFinal) && !(excludeUrls && excludeUrls.has(normFinal))) {
           pages.push(normFinal);
           if (onProgress) onProgress(pages.length);
         }
@@ -235,7 +235,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress) {
 
         for (const href of hrefs) {
           const norm = normalizeUrl(rootUrl, href);
-          if (norm && !visited.has(norm) && !queue.includes(norm)) {
+          if (norm && !visited.has(norm) && !queue.includes(norm) && !(excludeUrls && excludeUrls.has(norm))) {
             queue.push(norm);
           }
         }
@@ -254,7 +254,35 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress) {
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
-export async function crawlWebsite(rootUrl, maxPages = 50, onProgress = null) {
+/**
+ * Fetch all URLs listed in the given sitemap URLs (for building an exclude set).
+ * @param {string[]} sitemapUrls - Array of sitemap XML URLs to fetch and parse.
+ * @returns {Promise<Set<string>>} Set of normalized URLs found in those sitemaps.
+ */
+export async function fetchUrlsFromSitemaps(sitemapUrls) {
+  const excluded = new Set();
+  for (const sitemapUrl of sitemapUrls) {
+    try {
+      const origin = new URL(sitemapUrl).origin;
+      const xml = await fetchXml(sitemapUrl);
+      if (!xml) continue;
+      const urls = await parseSitemap(xml, origin);
+      for (const url of urls) {
+        try {
+          const u = new URL(url);
+          u.hash = '';
+          if (u.pathname !== '/' && u.pathname.endsWith('/')) {
+            u.pathname = u.pathname.slice(0, -1);
+          }
+          excluded.add(u.href);
+        } catch {}
+      }
+    } catch {}
+  }
+  return excluded;
+}
+
+export async function crawlWebsite(rootUrl, maxPages = 50, onProgress = null, excludeUrls = null) {
   let normalizedRoot;
   try {
     const u = new URL(rootUrl);
@@ -271,16 +299,19 @@ export async function crawlWebsite(rootUrl, maxPages = 50, onProgress = null) {
   const sitemapUrls = await discoverFromSitemap(normalizedRoot);
 
   if (sitemapUrls.length > 0) {
-    // Deduplicate, filter by same hostname, enforce maxPages
+    // Deduplicate, filter by same hostname, apply excludes, enforce maxPages
     const seen = new Set();
     const filtered = [];
     for (const url of sitemapUrls) {
       const norm = normalizeUrl(normalizedRoot, url);
-      if (norm && !seen.has(norm)) {
+      if (norm && !seen.has(norm) && !(excludeUrls && excludeUrls.has(norm))) {
         seen.add(norm);
         filtered.push(norm);
       }
       if (filtered.length >= maxPages) break;
+    }
+    if (excludeUrls && excludeUrls.size > 0) {
+      console.log(`[crawler] Excluded ${sitemapUrls.length - filtered.length} URL(s) via exclude sitemaps`);
     }
     if (onProgress) onProgress(filtered.length);
     return filtered;
@@ -288,5 +319,5 @@ export async function crawlWebsite(rootUrl, maxPages = 50, onProgress = null) {
 
   // ── Strategy 2: Puppeteer crawl (JS-rendered / decoupled sites) ───────────
   console.log('[crawler] No sitemap found — falling back to Puppeteer crawl with JS rendering');
-  return crawlWithBrowser(normalizedRoot, maxPages, onProgress);
+  return crawlWithBrowser(normalizedRoot, maxPages, onProgress, excludeUrls);
 }

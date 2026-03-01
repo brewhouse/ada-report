@@ -214,7 +214,7 @@ async function generatePdfBuffer(htmlContent) {
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/audit', (req, res) => {
-  const { url, maxPages = 50, urlList } = req.body;
+  const { url, maxPages = 50, urlList, excludeSitemaps } = req.body;
 
   // URL-list mode: validate each entry
   if (urlList) {
@@ -233,6 +233,16 @@ app.post('/api/audit', (req, res) => {
     }
   }
 
+  // Validate excludeSitemaps (optional, crawl mode only)
+  const resolvedExcludes = [];
+  if (excludeSitemaps && Array.isArray(excludeSitemaps)) {
+    for (const s of excludeSitemaps) {
+      try { new URL(s); resolvedExcludes.push(s); } catch {
+        return res.status(400).json({ error: `Invalid exclude sitemap URL: ${s}` });
+      }
+    }
+  }
+
   cleanOldSessions();
 
   const resolvedUrl = urlList ? urlList[0] : url;
@@ -241,6 +251,7 @@ app.post('/api/audit', (req, res) => {
     id: auditId,
     url: resolvedUrl,
     urlList: urlList || null,
+    excludeSitemaps: resolvedExcludes.length > 0 ? resolvedExcludes : null,
     maxPages: urlList ? urlList.length : Math.min(Math.max(1, parseInt(maxPages) || 50), 5000),
     status: 'queued',
     startTime: new Date().toISOString(),

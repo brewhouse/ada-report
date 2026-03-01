@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { crawlWebsite } from './crawler.js';
+import { crawlWebsite, fetchUrlsFromSitemaps } from './crawler.js';
 import { launchBrowser, runLighthouseAudit } from './lighthouse-runner.js';
 
 const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
@@ -102,9 +102,16 @@ export async function startAudit(session, onUpdate) {
     // Phase 1: Crawl
     onUpdate({ status: 'crawling', progress: { crawled: 0, total: 0, audited: 0 } });
 
+    let excludeUrls = null;
+    if (session.excludeSitemaps && session.excludeSitemaps.length > 0) {
+      console.log(`[audit] Fetching ${session.excludeSitemaps.length} exclude sitemap(s)…`);
+      excludeUrls = await fetchUrlsFromSitemaps(session.excludeSitemaps);
+      console.log(`[audit] Excluding ${excludeUrls.size} URL(s) from audit`);
+    }
+
     pages = await crawlWebsite(session.url, session.maxPages, (count) => {
       onUpdate({ progress: { crawled: count, total: count, audited: 0 } });
-    });
+    }, excludeUrls);
 
     if (pages.length === 0) {
       throw new Error('No pages found to audit. The site may be inaccessible or block crawlers.');

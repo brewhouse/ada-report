@@ -834,3 +834,19 @@ a:hover { text-decoration: underline; }
   white-space: pre; margin: 0;
 }
 .fix-code-block code { font-family: 'Menlo', 'Monaco', 'Consolas', monospace; }
+
+/* ===================== EXCLUDE SITEMAPS ===================== */
+.exclude-sitemaps-section { margin-bottom: 20px; }
+.exclude-toggle-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: var(--gray-600);
+  background: none; border: none; cursor: pointer;
+  padding: 4px 0; transition: color 0.15s;
+}
+.exclude-toggle-btn:hover { color: var(--primary); }
+.exclude-toggle-btn svg { transition: transform 0.2s ease; flex-shrink: 0; }
+.exclude-sitemaps-hint {
+  font-size: 12.5px; color: var(--gray-500); margin: 10px 0 8px;
+  line-height: 1.5;
+}
+.exclude-sitemaps-textarea { margin-bottom: 0; }

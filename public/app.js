@@ -214,7 +214,8 @@ document.getElementById('audit-form').addEventListener('submit', async (e) => {
       const url = document.getElementById('url-input').value.trim();
       if (!url) throw new Error('Please enter a website URL.');
       const maxPages = parseInt(document.getElementById('max-pages-input').value);
-      body = { url, maxPages };
+      const excludeSitemaps = parseExcludeSitemaps();
+      body = { url, maxPages, ...(excludeSitemaps.length > 0 && { excludeSitemaps }) };
     }
 
     const res = await fetch('/api/audit', {
@@ -245,6 +246,31 @@ document.getElementById('audit-form').addEventListener('submit', async (e) => {
 document.getElementById('max-pages-input').addEventListener('input', (e) => {
   document.getElementById('max-pages-display').textContent = e.target.value;
 });
+
+// Exclude sitemaps toggle
+document.getElementById('exclude-toggle-btn').addEventListener('click', () => {
+  const fields = document.getElementById('exclude-sitemaps-fields');
+  const btn = document.getElementById('exclude-toggle-btn');
+  const icon = document.getElementById('exclude-toggle-icon');
+  const expanded = fields.style.display !== 'none';
+  fields.style.display = expanded ? 'none' : 'block';
+  btn.setAttribute('aria-expanded', String(!expanded));
+  icon.style.transform = expanded ? '' : 'rotate(180deg)';
+});
+
+// Live count for exclude sitemaps
+document.getElementById('exclude-sitemaps-input').addEventListener('input', () => {
+  const urls = parseExcludeSitemaps();
+  const el = document.getElementById('exclude-sitemaps-count');
+  el.textContent = urls.length > 0 ? `${urls.length} sitemap${urls.length !== 1 ? 's' : ''} to exclude` : '';
+});
+
+function parseExcludeSitemaps() {
+  return document.getElementById('exclude-sitemaps-input').value
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l && (l.startsWith('http://') || l.startsWith('https://')));
+}
 
 // ===================== WEBSOCKET =====================
 
