@@ -11,6 +11,10 @@ import puppeteer from 'puppeteer';
 import { startAudit, rescanPage } from './src/audit-manager.js';
 import { generateReport, generateSummaryReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
+import {
+  initScheduler, getSchedules, addSchedule,
+  updateSchedule, deleteSchedule, triggerNow,
+} from './src/scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,6 +42,31 @@ const MAX_CONCURRENT_AUDITS = 4;
 app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
+
+// ── Scheduler auth ──────────────────────────────────────────────────────────────
+// Token store: token → expiry timestamp
+const schedulerTokens = new Map();
+const TOKEN_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+function schedulerAuth(req, res, next) {
+  const auth = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  const expiry = schedulerTokens.get(token);
+  if (!expiry || Date.now() > expiry) {
+    schedulerTokens.delete(token);
+    return res.status(401).json({ error: 'Session expired — please sign in again' });
+  }
+  next();
+}
+
+// Periodically prune expired tokens
+setInterval(() => {
+  const now = Date.now();
+  for (const [tok, exp] of schedulerTokens) {
+    if (now > exp) schedulerTokens.delete(tok);
+  }
+}, 60 * 60 * 1000);
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', sessions: auditSessions.size }));
@@ -512,6 +541,91 @@ app.post('/api/audit/:id/fix', async (req, res) => {
   }
 });
 
+// ── Scheduler page (protected SPA) ─────────────────────────────────────────────
+app.get('/scheduler', (_req, res) => {
+  res.sendFile(join(__dirname, 'public', 'scheduler.html'));
+});
+
+// ── Scheduler auth routes ───────────────────────────────────────────────────────
+
+app.post('/api/scheduler/login', (req, res) => {
+  const { username, password } = req.body;
+  const validUser = process.env.SCHEDULER_USER || 'admin';
+  const validPass = process.env.SCHEDULER_PASS || 'inquiros2025';
+  if (username !== validUser || password !== validPass) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  const token = uuidv4();
+  schedulerTokens.set(token, Date.now() + TOKEN_TTL_MS);
+  res.json({ token, schedules: getSchedules() });
+});
+
+app.post('/api/scheduler/logout', schedulerAuth, (req, res) => {
+  const token = req.headers['authorization']?.slice(7);
+  if (token) schedulerTokens.delete(token);
+  res.json({ success: true });
+});
+
+// ── Scheduler CRUD routes ───────────────────────────────────────────────────────
+
+app.get('/api/scheduler/schedules', schedulerAuth, (_req, res) => {
+  res.json(getSchedules());
+});
+
+app.post('/api/scheduler/schedules', schedulerAuth, async (req, res) => {
+  const { name, url, maxPages, excludeSitemaps, frequency, dayOfWeek,
+          dayOfMonth, hour, minute, emails, brand, enabled } = req.body;
+
+  if (!url) return res.status(400).json({ error: 'url is required' });
+  try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+  if (!emails || !Array.isArray(emails) || emails.length === 0) {
+    return res.status(400).json({ error: 'At least one email address is required' });
+  }
+  const validFreqs = ['daily', 'weekly', 'monthly'];
+  if (frequency && !validFreqs.includes(frequency)) {
+    return res.status(400).json({ error: 'frequency must be daily, weekly, or monthly' });
+  }
+
+  try {
+    const schedule = await addSchedule({
+      name, url, maxPages, excludeSitemaps, frequency, dayOfWeek,
+      dayOfMonth, hour, minute, emails, brand, enabled,
+    });
+    res.status(201).json(schedule);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/scheduler/schedules/:id', schedulerAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const updated = await updateSchedule(id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Schedule not found' });
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/scheduler/schedules/:id', schedulerAuth, async (req, res) => {
+  try {
+    await deleteSchedule(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/scheduler/schedules/:id/run', schedulerAuth, async (req, res) => {
+  try {
+    await triggerNow(req.params.id);
+    res.json({ success: true, message: 'Audit started in background' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('*', (_req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
@@ -520,6 +634,7 @@ app.get('*', (_req, res) => {
 
 await mkdir(DATA_DIR, { recursive: true }).catch(() => {});
 await loadSessionsFromDisk();
+await initScheduler(DATA_DIR);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
