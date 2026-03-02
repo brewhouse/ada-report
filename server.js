@@ -19,6 +19,10 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// node-cron registers SIGINT/SIGTERM/exit/SIGHUP listeners per scheduled task.
+// Raise the limit so multiple schedules don't trigger a false memory-leak warning.
+process.setMaxListeners(100);
+
 // Session persistence directory — set DATA_DIR env var to a Render Disk mount path
 // for persistence across deployments (e.g. DATA_DIR=/data/sessions)
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'data', 'sessions');
