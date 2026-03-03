@@ -41,7 +41,7 @@ const wsConnections = new Map();
 // Audit queue for rate limiting
 const auditQueue = [];
 let runningAudits = 0;
-const MAX_CONCURRENT_AUDITS = 4;
+const MAX_CONCURRENT_AUDITS = 2;
 
 app.use(cors());
 app.use(express.json());
@@ -194,16 +194,41 @@ async function processAuditQueue() {
     );
   });
 
+  // Debounce WS broadcasts during page-by-page progress to reduce serialization overhead.
+  // Status transitions (crawling → auditing → completed) are always sent immediately.
+  let broadcastTimer = null;
+
+  function flushBroadcast() {
+    if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
+    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+  }
+
   try {
     await Promise.race([
       startAudit(session, (update) => {
-        Object.assign(session, update);
-        broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+        if ('completedPage' in update) {
+          // Accumulate single page into session.pages (O(1) per update)
+          if (update.completedPage) session.pages.push(update.completedPage);
+          const { completedPage, ...rest } = update;
+          Object.assign(session, rest);
+          // Debounce: broadcast at most every 2 s during page auditing
+          if (!broadcastTimer) {
+            broadcastTimer = setTimeout(() => {
+              broadcastTimer = null;
+              broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+            }, 2000);
+          }
+        } else {
+          // Status change or final completion — flush immediately
+          Object.assign(session, update);
+          flushBroadcast();
+        }
       }),
       timeout,
     ]);
     await saveSessionToDisk(session);
   } catch (error) {
+    if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
     session.status = 'error';
     session.error = error.message;
     session.endTime = new Date().toISOString();
@@ -211,6 +236,7 @@ async function processAuditQueue() {
     await saveSessionToDisk(session);
   } finally {
     clearTimeout(timeoutId);
+    if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
     runningAudits--;
     processAuditQueue();
   }

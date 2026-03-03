@@ -86,10 +86,37 @@ export async function rescanPage(url) {
   }
 }
 
-// Number of pages to audit in parallel (each gets its own browser instance)
-const CONCURRENT_PAGES = 4;
+// Global semaphore — caps total concurrent audits regardless of code path
+// (manual queue + scheduled triggers combined).
+let _globalAuditCount = 0;
+const _MAX_GLOBAL_AUDITS = 2;
+const _globalWaiters = [];
+
+function _acquireGlobalSlot() {
+  return new Promise(resolve => {
+    if (_globalAuditCount < _MAX_GLOBAL_AUDITS) { _globalAuditCount++; resolve(); }
+    else _globalWaiters.push(resolve);
+  });
+}
+
+function _releaseGlobalSlot() {
+  if (_globalWaiters.length > 0) _globalWaiters.shift()();
+  else _globalAuditCount--;
+}
+
+// Number of pages to audit in parallel within a single audit (each page = one browser).
+const CONCURRENT_PAGES = 2;
 
 export async function startAudit(session, onUpdate) {
+  await _acquireGlobalSlot();
+  try {
+    return await _runAudit(session, onUpdate);
+  } finally {
+    _releaseGlobalSlot();
+  }
+}
+
+async function _runAudit(session, onUpdate) {
   let pages;
 
   if (session.urlList && session.urlList.length > 0) {
@@ -119,9 +146,14 @@ export async function startAudit(session, onUpdate) {
   }
 
   // Filter out URLs that redirect to a different location (3xx) or return 404/410.
-  // Run checks in parallel so this step is fast even for large page lists.
+  // Run checks in batches of 25 to avoid saturating connections on large sitemaps.
   {
-    const statuses = await Promise.all(pages.map(url => checkUrlStatus(url)));
+    const BATCH = 25;
+    const statuses = [];
+    for (let i = 0; i < pages.length; i += BATCH) {
+      const batch = pages.slice(i, i + BATCH);
+      statuses.push(...await Promise.all(batch.map(u => checkUrlStatus(u))));
+    }
     const before = pages.length;
     pages = pages.filter((_, i) => statuses[i] === 'ok');
     const skipped = before - pages.length;
@@ -194,8 +226,9 @@ export async function startAudit(session, onUpdate) {
 
         auditedPages[i] = pageResult;
         auditedCount++;
+        // Emit single page rather than full pages array on every update (avoids O(n²) work)
         onUpdate({
-          pages: auditedPages.filter(Boolean),
+          completedPage: pageResult,
           progress: {
             crawled: pages.length,
             total: pages.length,

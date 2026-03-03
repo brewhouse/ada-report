@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import cron from 'node-cron';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile, rename as renameFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
@@ -166,7 +166,15 @@ async function runScheduledAudit(scheduleId) {
 
   try {
     await Promise.race([
-      startAudit(session, update => Object.assign(session, update)),
+      startAudit(session, update => {
+        if ('completedPage' in update) {
+          if (update.completedPage) session.pages.push(update.completedPage);
+          const { completedPage, ...rest } = update;
+          Object.assign(session, rest);
+        } else {
+          Object.assign(session, update);
+        }
+      }),
       timeout,
     ]);
 
@@ -224,7 +232,10 @@ function registerCronJob(schedule) {
 
 async function saveSchedules() {
   if (!schedulesFile) return;
-  await writeFile(schedulesFile, JSON.stringify([...schedules.values()], null, 2), 'utf8');
+  // Write to a temp file first, then atomically rename — prevents data loss on OOM kill.
+  const tmp = schedulesFile + '.tmp';
+  await writeFile(tmp, JSON.stringify([...schedules.values()], null, 2), 'utf8');
+  await renameFile(tmp, schedulesFile);
 }
 
 async function loadSchedules() {
@@ -241,6 +252,7 @@ async function loadSchedules() {
 
 export async function initScheduler(dataDir) {
   schedulesFile = join(dataDir, 'schedules.json');
+  console.log(`[scheduler] Schedules file: ${schedulesFile}`);
   await loadSchedules();
   for (const s of schedules.values()) registerCronJob(s);
 }
