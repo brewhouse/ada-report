@@ -104,6 +104,11 @@ function _releaseGlobalSlot() {
   else _globalAuditCount--;
 }
 
+// Force-release a global slot — used when a timed-out audit left the semaphore stuck.
+export function forceReleaseGlobalSlot() {
+  if (_globalAuditCount > 0) _releaseGlobalSlot();
+}
+
 // Number of pages to audit in parallel within a single audit (each page = one browser).
 const CONCURRENT_PAGES = 2;
 

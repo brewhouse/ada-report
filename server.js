@@ -8,7 +8,7 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
-import { startAudit, rescanPage } from './src/audit-manager.js';
+import { startAudit, rescanPage, forceReleaseGlobalSlot } from './src/audit-manager.js';
 import { generateReport, generateSummaryReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
 import {
@@ -569,6 +569,73 @@ app.post('/api/audit/:id/fix', async (req, res) => {
     console.error('[fix] Error:', err.message);
     res.status(500).json({ error: 'Fix failed: ' + err.message });
   }
+});
+
+// ── Queue management ────────────────────────────────────────────────────────────
+
+// GET /api/queue — show current queue state
+app.get('/api/queue', (_req, res) => {
+  res.json({
+    runningAudits,
+    maxConcurrent: MAX_CONCURRENT_AUDITS,
+    queueLength: auditQueue.length,
+    queued: auditQueue.map(({ session }) => ({
+      id: session.id,
+      url: session.url,
+      startTime: session.startTime,
+    })),
+    active: [...auditSessions.values()]
+      .filter(s => s.status === 'auditing' || s.status === 'crawling')
+      .map(s => ({ id: s.id, url: s.url, status: s.status, startTime: s.startTime })),
+  });
+});
+
+// DELETE /api/queue — cancel all queued (not yet running) sessions
+app.delete('/api/queue', (_req, res) => {
+  const cancelled = [];
+  while (auditQueue.length > 0) {
+    const { session } = auditQueue.shift();
+    session.status = 'error';
+    session.error = 'Cancelled — queue was cleared';
+    session.endTime = new Date().toISOString();
+    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    cancelled.push(session.id);
+  }
+  res.json({ cancelled, message: `Cleared ${cancelled.length} queued audit(s)` });
+});
+
+// DELETE /api/audit/:id — force-cancel a specific audit (queued or stuck-running)
+app.delete('/api/audit/:id', (req, res) => {
+  const session = auditSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+
+  const wasActive = session.status === 'auditing' || session.status === 'crawling';
+  const wasQueued = session.status === 'queued';
+
+  if (!wasActive && !wasQueued) {
+    return res.status(400).json({ error: `Audit is already ${session.status} — nothing to cancel` });
+  }
+
+  // Remove from queue if it hasn't started yet
+  if (wasQueued) {
+    const idx = auditQueue.findIndex(({ session: s }) => s.id === session.id);
+    if (idx >= 0) auditQueue.splice(idx, 1);
+  }
+
+  // Mark as cancelled
+  session.status = 'error';
+  session.error = 'Cancelled by user';
+  session.endTime = new Date().toISOString();
+  broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+
+  // Release the running slot so the queue can proceed
+  if (wasActive) {
+    runningAudits = Math.max(0, runningAudits - 1);
+    forceReleaseGlobalSlot();
+    processAuditQueue();
+  }
+
+  res.json({ success: true, id: session.id, wasActive, wasQueued });
 });
 
 // ── Scheduler page (protected SPA) ─────────────────────────────────────────────
