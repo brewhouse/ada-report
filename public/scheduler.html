@@ -389,12 +389,20 @@
           </div>
         </div>
 
-        <!-- Emails -->
+        <!-- Client Emails -->
         <div class="sch-form-row">
-          <label for="f-emails">Recipient Emails</label>
+          <label for="f-emails">Client Emails</label>
           <textarea id="f-emails" class="sch-textarea" rows="2"
             placeholder="client@example.com&#10;manager@example.com"></textarea>
-          <div class="sch-hint">One email per line. The client summary report PDF will be attached.</div>
+          <div class="sch-hint">One email per line. Receives the client-facing summary report PDF.</div>
+        </div>
+
+        <!-- Developer Emails -->
+        <div class="sch-form-row">
+          <label for="f-dev-emails">Developer Emails <span class="optional">(optional)</span></label>
+          <textarea id="f-dev-emails" class="sch-textarea" rows="2"
+            placeholder="dev@agency.com&#10;remediation@agency.com"></textarea>
+          <div class="sch-hint">One email per line. Receives a link to the full detailed report with per-page issue breakdowns for remediation.</div>
         </div>
 
         <!-- Brand -->

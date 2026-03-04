@@ -1,16 +1,17 @@
 import { v4 as uuidv4 } from 'uuid';
 import cron from 'node-cron';
-import { readFile, writeFile, rename as renameFile } from 'fs/promises';
+import { readFile, writeFile, rename as renameFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit } from './audit-manager.js';
-import { generateSummaryReport } from './report-generator.js';
+import { generateReport, generateSummaryReport } from './report-generator.js';
 
 const TIMEZONE = 'America/Los_Angeles';
 const AUDIT_TIMEOUT_MS = 240 * 60 * 1000; // 240 minutes
 
 let schedulesFile = null;
+let reportsDir = null;
 const schedules = new Map();  // id → schedule object
 const cronJobs  = new Map();  // id → node-cron task
 
@@ -76,6 +77,48 @@ async function generatePdfBuffer(htmlContent) {
 }
 
 // ── Email delivery ─────────────────────────────────────────────────────────────
+
+async function sendDevReport(session, schedule, reportUrl) {
+  if (!schedule.devEmails?.length) return;
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return;
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  });
+
+  const avg = session.summary?.averageScore ?? 0;
+
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to:   schedule.devEmails.join(', '),
+    subject: `ADA Detailed Report (Developer) – ${session.url}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+        <h2 style="color:#107DC2;">ADA Detailed Accessibility Report</h2>
+        <p>A scheduled audit completed for <strong>${session.url}</strong>. The full detailed report (with per-page issue breakdowns) is available for download below.</p>
+        <table style="margin:20px 0;border-collapse:collapse;width:100%;">
+          <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Pages Audited</td><td style="padding:8px 12px;border:1px solid #e2e8f0;">${session.summary?.totalPages ?? 0}</td></tr>
+          <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Average Score</td><td style="padding:8px 12px;border:1px solid #e2e8f0;">${avg}/100</td></tr>
+          <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Total Issues</td><td style="padding:8px 12px;border:1px solid #e2e8f0;">${session.summary?.totalIssues ?? 0}</td></tr>
+          <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Critical</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#dc2626;">${session.summary?.criticalIssues ?? 0}</td></tr>
+          <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
+        </table>
+        <p>
+          <a href="${reportUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">
+            Download Full Report
+          </a>
+        </p>
+        <p style="font-size:12px;color:#94a3b8;margin-top:8px;">This link is valid for 30 days.</p>
+        <p style="font-size:12px;color:#94a3b8;margin-top:32px;">Scheduled report by Planeteria Inquiros ADA Checker &bull; Powered by Google Lighthouse</p>
+      </div>
+    `,
+  });
+
+  console.log(`[scheduler] Dev report emailed to ${schedule.devEmails.join(', ')} for ${schedule.url}`);
+}
 
 async function sendReport(session, schedule) {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
@@ -179,7 +222,27 @@ async function runScheduledAudit(scheduleId) {
     ]);
 
     if (session.status === 'completed') {
+      // Save detailed HTML report to disk and email link to developers
+      let reportUrl = null;
+      if (reportsDir) {
+        try {
+          const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+          const date = new Date().toISOString().split('T')[0];
+          const reportFilename = `${domain}-${date}-${session.id}.html`;
+          const reportHtml = generateReport(session, schedule.brand || null, false);
+          await writeFile(join(reportsDir, reportFilename), reportHtml, 'utf8');
+          const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+          reportUrl = `${baseUrl}/api/reports/${reportFilename}`;
+          console.log(`[scheduler] Detailed report saved: ${reportFilename}`);
+        } catch (err) {
+          console.warn('[scheduler] Failed to save detailed report:', err.message);
+        }
+      }
+
       await sendReport(session, schedule);
+      if (reportUrl) await sendDevReport(session, schedule, reportUrl).catch(err =>
+        console.warn('[scheduler] Dev report email failed:', err.message)
+      );
       await patchSchedule(scheduleId, {
         lastRun: startedAt, lastRunStatus: 'success', lastRunError: null,
       });
@@ -252,6 +315,8 @@ async function loadSchedules() {
 
 export async function initScheduler(dataDir) {
   schedulesFile = join(dataDir, 'schedules.json');
+  reportsDir = join(dataDir, 'reports');
+  await mkdir(reportsDir, { recursive: true }).catch(() => {});
   console.log(`[scheduler] Schedules file: ${schedulesFile}`);
   await loadSchedules();
   for (const s of schedules.values()) registerCronJob(s);
@@ -277,7 +342,8 @@ export async function addSchedule(data) {
     dayOfMonth:      data.dayOfMonth ?? 1,
     hour:            data.hour   ?? 8,
     minute:          data.minute ?? 0,
-    emails:          data.emails || [],
+    emails:          data.emails    || [],
+    devEmails:       data.devEmails || [],
     brand:           data.brand  || 'planeteria',
     enabled:         data.enabled !== false,
     lastRun:         null,

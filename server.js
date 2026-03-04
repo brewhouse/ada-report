@@ -571,6 +571,23 @@ app.post('/api/audit/:id/fix', async (req, res) => {
   }
 });
 
+// ── Saved reports (scheduler detailed reports) ─────────────────────────────────
+
+app.get('/api/reports/:filename', async (req, res) => {
+  const { filename } = req.params;
+  // Allow only safe filenames: alphanumeric, hyphens, underscores, dots, ending in .html
+  if (!/^[\w.-]+-[0-9a-f-]{36}\.html$/.test(filename)) {
+    return res.status(400).json({ error: 'Invalid report filename' });
+  }
+  try {
+    const content = await readFile(join(DATA_DIR, 'reports', filename), 'utf8');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(content);
+  } catch {
+    res.status(404).json({ error: 'Report not found or has expired' });
+  }
+});
+
 // ── Queue management ────────────────────────────────────────────────────────────
 
 // GET /api/queue — show current queue state

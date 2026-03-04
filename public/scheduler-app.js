@@ -215,6 +215,7 @@ function resetForm() {
   document.getElementById('f-maxpages').value = '50';
   document.getElementById('f-exclude').value = '';
   document.getElementById('f-emails').value = '';
+  document.getElementById('f-dev-emails').value = '';
   document.getElementById('f-hour').value = '8';
   document.getElementById('f-minute').value = '0';
   document.getElementById('f-dom').value = '1';
@@ -282,7 +283,8 @@ async function openEditModal(id) {
     document.getElementById('f-url').value      = s.url  || '';
     document.getElementById('f-maxpages').value = s.maxPages || 50;
     document.getElementById('f-exclude').value  = (s.excludeSitemaps || []).join('\n');
-    document.getElementById('f-emails').value   = (s.emails || []).join('\n');
+    document.getElementById('f-emails').value     = (s.emails    || []).join('\n');
+    document.getElementById('f-dev-emails').value = (s.devEmails || []).join('\n');
     document.getElementById('f-hour').value     = s.hour   ?? 8;
     document.getElementById('f-minute').value   = s.minute ?? 0;
     document.getElementById('f-dom').value      = s.dayOfMonth ?? 1;
@@ -321,6 +323,8 @@ document.getElementById('sch-modal-save').addEventListener('click', async () => 
     hour:            parseInt(document.getElementById('f-hour').value)   || 0,
     minute:          parseInt(document.getElementById('f-minute').value) || 0,
     emails:          emailLines,
+    devEmails:       document.getElementById('f-dev-emails').value
+                       .split('\n').map(l => l.trim()).filter(Boolean),
     brand:           selectedBrand,
     enabled:         document.getElementById('f-enabled').checked,
   };
