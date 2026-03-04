@@ -380,3 +380,24 @@ export async function triggerNow(id) {
     console.error('[scheduler] triggerNow error:', err.message)
   );
 }
+
+export async function importSchedules(items) {
+  let imported = 0, updated = 0, skipped = 0;
+  for (const item of items) {
+    if (!item?.id || !item?.url) { skipped++; continue; }
+    try { new URL(item.url); } catch { skipped++; continue; }
+
+    if (schedules.has(item.id)) {
+      const merged = { ...schedules.get(item.id), ...item, id: item.id };
+      schedules.set(item.id, merged);
+      registerCronJob(merged);
+      updated++;
+    } else {
+      schedules.set(item.id, item);
+      registerCronJob(item);
+      imported++;
+    }
+  }
+  await saveSchedules();
+  return { imported, updated, skipped, total: items.length };
+}

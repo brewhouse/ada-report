@@ -278,12 +278,21 @@
           <h1>Scheduled Audits</h1>
           <p>Automatically run accessibility audits and email summary reports on a schedule.</p>
         </div>
-        <button id="sch-add-btn" class="btn-primary btn-sm">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          Add Schedule
-        </button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button id="sch-export-btn" class="sch-act-btn" title="Download all schedules as a JSON backup">
+            Export
+          </button>
+          <label id="sch-import-label" class="sch-act-btn" title="Restore schedules from a JSON backup" style="cursor:pointer;margin:0">
+            Import
+            <input type="file" id="sch-import-input" accept=".json" style="display:none">
+          </label>
+          <button id="sch-add-btn" class="btn-primary btn-sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Add Schedule
+          </button>
+        </div>
       </div>
 
       <div class="sch-table-wrap">

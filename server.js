@@ -13,7 +13,7 @@ import { generateReport, generateSummaryReport } from './src/report-generator.js
 import { applyFix } from './src/wp-fixer.js';
 import {
   initScheduler, getSchedules, addSchedule,
-  updateSchedule, deleteSchedule, triggerNow,
+  updateSchedule, deleteSchedule, triggerNow, importSchedules,
 } from './src/scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -186,10 +186,14 @@ async function processAuditQueue() {
   const { session } = auditQueue.shift();
   runningAudits++;
 
+  // Tracks whether the slot was already released externally (via DELETE /api/audit/:id).
+  // Prevents double-decrement of runningAudits and zombie status overwrites.
+  session._cancelledExternally = false;
+
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(
-      () => reject(new Error('Audit timed out after 25 minutes')),
+      () => reject(new Error('Audit timed out after 240 minutes')),
       MAX_AUDIT_DURATION_MS
     );
   });
@@ -206,6 +210,10 @@ async function processAuditQueue() {
   try {
     await Promise.race([
       startAudit(session, (update) => {
+        // If this audit was externally cancelled or already in a terminal state,
+        // ignore any further updates from the still-running async operation.
+        if (session._cancelledExternally || session.status === 'error') return;
+
         if ('completedPage' in update) {
           // Accumulate single page into session.pages (O(1) per update)
           if (update.completedPage) session.pages.push(update.completedPage);
@@ -226,19 +234,24 @@ async function processAuditQueue() {
       }),
       timeout,
     ]);
-    await saveSessionToDisk(session);
+    if (!session._cancelledExternally) await saveSessionToDisk(session);
   } catch (error) {
     if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
-    session.status = 'error';
-    session.error = error.message;
-    session.endTime = new Date().toISOString();
-    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-    await saveSessionToDisk(session);
+    if (!session._cancelledExternally) {
+      session.status = 'error';
+      session.error = error.message;
+      session.endTime = new Date().toISOString();
+      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+      await saveSessionToDisk(session);
+    }
   } finally {
     clearTimeout(timeoutId);
     if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
-    runningAudits--;
-    processAuditQueue();
+    // Only release the slot here if the cancel endpoint hasn't already done so.
+    if (!session._cancelledExternally) {
+      runningAudits--;
+      processAuditQueue();
+    }
   }
 }
 
@@ -639,13 +652,17 @@ app.delete('/api/audit/:id', (req, res) => {
     if (idx >= 0) auditQueue.splice(idx, 1);
   }
 
-  // Mark as cancelled
+  // Mark as cancelled — set flag BEFORE updating status so the processAuditQueue
+  // onUpdate guard sees it and stops overwriting the session state.
+  if (wasActive) session._cancelledExternally = true;
+
   session.status = 'error';
   session.error = 'Cancelled by user';
   session.endTime = new Date().toISOString();
   broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
 
-  // Release the running slot so the queue can proceed
+  // Release the running slot so the queue can proceed.
+  // processAuditQueue's finally block will see _cancelledExternally and skip its own release.
   if (wasActive) {
     runningAudits = Math.max(0, runningAudits - 1);
     forceReleaseGlobalSlot();
@@ -735,6 +752,28 @@ app.post('/api/scheduler/schedules/:id/run', schedulerAuth, async (req, res) => 
   try {
     await triggerNow(req.params.id);
     res.json({ success: true, message: 'Audit started in background' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Export all schedules as a downloadable JSON backup
+app.get('/api/scheduler/schedules/export', schedulerAuth, (_req, res) => {
+  const data = getSchedules();
+  const date = new Date().toISOString().split('T')[0];
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="schedules-${date}.json"`);
+  res.send(JSON.stringify(data, null, 2));
+});
+
+// Import schedules from a JSON backup
+app.post('/api/scheduler/schedules/import', schedulerAuth, async (req, res) => {
+  if (!Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Expected a JSON array of schedules' });
+  }
+  try {
+    const result = await importSchedules(req.body);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

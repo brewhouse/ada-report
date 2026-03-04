@@ -72,6 +72,46 @@ document.getElementById('sch-logout-btn').addEventListener('click', () => {
   showLogin();
 });
 
+// ===================== EXPORT / IMPORT =====================
+
+document.getElementById('sch-export-btn').addEventListener('click', async () => {
+  try {
+    const res = await fetch('/api/scheduler/schedules/export', { headers: authHeaders() });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `schedules-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showToast(`Export failed: ${err.message}`, true);
+  }
+});
+
+document.getElementById('sch-import-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const res = await fetch('/api/scheduler/schedules/import', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Import failed');
+    showToast(`Imported ${result.imported} new, updated ${result.updated}${result.skipped ? `, skipped ${result.skipped} invalid` : ''}`);
+    await reloadTable();
+  } catch (err) {
+    showToast(`Import failed: ${err.message}`, true);
+  } finally {
+    e.target.value = ''; // reset so the same file can be re-selected
+  }
+});
+
 // ===================== TABLE RENDER =====================
 
 function escHtml(s) {
