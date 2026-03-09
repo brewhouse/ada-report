@@ -89,7 +89,7 @@ export async function rescanPage(url) {
 // Global semaphore — caps total concurrent audits regardless of code path
 // (manual queue + scheduled triggers combined).
 let _globalAuditCount = 0;
-const _MAX_GLOBAL_AUDITS = 2;
+const _MAX_GLOBAL_AUDITS = 4;
 const _globalWaiters = [];
 
 function _acquireGlobalSlot() {

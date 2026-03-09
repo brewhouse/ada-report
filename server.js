@@ -41,7 +41,7 @@ const wsConnections = new Map();
 // Audit queue for rate limiting
 const auditQueue = [];
 let runningAudits = 0;
-const MAX_CONCURRENT_AUDITS = 2;
+const MAX_CONCURRENT_AUDITS = 4;
 
 app.use(cors());
 app.use(express.json());

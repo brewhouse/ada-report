@@ -58,7 +58,7 @@ function normalizeUrl(baseUrl, href) {
 // ── HTTP client ────────────────────────────────────────────────────────────────
 
 const HTTP = axios.create({
-  timeout: 20000,
+  timeout: 45000,
   maxRedirects: 5,
   headers: {
     'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)',
@@ -202,7 +202,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
         );
 
         // Fast initial load — DOMContentLoaded is enough for PHP/server-rendered pages
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         // Detect whether this is a server-rendered page (PHP/WordPress) or a JS SPA.
         // Server-rendered pages have rich content immediately after DOMContentLoaded;
@@ -215,7 +215,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
 
         if (!isServerRendered) {
           // SPA / JS-rendered — wait for network to go quiet then give React time to paint
-          await page.waitForNetworkIdle({ idleTime: 500, timeout: 15000 }).catch(() => {});
+          await page.waitForNetworkIdle({ idleTime: 500, timeout: 30000 }).catch(() => {});
           await new Promise(r => setTimeout(r, 1500));
         }
 
