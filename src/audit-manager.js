@@ -33,6 +33,7 @@ async function checkUrlStatus(url) {
 
     const status = res.status;
     if (status === 404 || status === 410) return 'not-found';
+    if (status === 403) return 'forbidden';
     if (status === 405 && method === 'head') continue; // HEAD not allowed, try GET
 
     // Detect content-redirect: the server followed redirects and landed on a
@@ -162,11 +163,20 @@ async function _runAudit(session, onUpdate) {
     const before = pages.length;
     pages = pages.filter((_, i) => statuses[i] === 'ok');
     const skipped = before - pages.length;
-    if (skipped > 0) console.log(`[audit] Skipped ${skipped} URL(s) — redirect or 404`);
+    if (skipped > 0) {
+      const forbidden = statuses.filter(s => s === 'forbidden').length;
+      const notFound = statuses.filter(s => s === 'not-found').length;
+      const redirected = statuses.filter(s => s === 'redirect').length;
+      const parts = [];
+      if (redirected > 0) parts.push(`${redirected} redirect`);
+      if (notFound > 0) parts.push(`${notFound} not-found`);
+      if (forbidden > 0) parts.push(`${forbidden} forbidden (403)`);
+      console.log(`[audit] Skipped ${skipped} URL(s) — ${parts.join(', ')}`);
+    }
   }
 
   if (pages.length === 0) {
-    throw new Error('No auditable pages found — all discovered URLs either redirect or return 404.');
+    throw new Error('No auditable pages found — all discovered URLs either redirect, return 404, or are access-denied (403).');
   }
 
   onUpdate({

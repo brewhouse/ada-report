@@ -31,7 +31,14 @@ function normalizeUrl(baseUrl, href) {
     const base = new URL(baseUrl);
     const resolved = new URL(href, baseUrl);
 
-    if (resolved.hostname !== base.hostname) return null;
+    // Treat www.example.com and example.com as the same site
+    const bareBase = base.hostname.replace(/^www\./, '');
+    const bareResolved = resolved.hostname.replace(/^www\./, '');
+    if (bareResolved !== bareBase) return null;
+    // Normalize to the root URL's hostname form to eliminate www/non-www duplicates
+    if (resolved.hostname !== base.hostname) {
+      resolved.hostname = base.hostname;
+    }
 
     const pathParts = resolved.pathname.split('.');
     if (pathParts.length > 1) {
@@ -109,8 +116,11 @@ async function parseSitemap(xml, origin, depth = 0) {
     const loc = $(el).text().trim();
     try {
       const u = new URL(loc);
-      // Accept same origin, or same hostname with different protocol
-      if (u.hostname === new URL(origin).hostname) {
+      // Accept same origin, or same hostname with different protocol or www/non-www variant
+      const originHost = new URL(origin).hostname;
+      if (u.hostname.replace(/^www\./, '') === originHost.replace(/^www\./, '')) {
+        // Normalize hostname to origin's form to eliminate www/non-www duplicates
+        u.hostname = originHost;
         // Normalize trailing slash, remove fragment
         u.hash = '';
         if (u.pathname !== '/' && u.pathname.endsWith('/')) {
