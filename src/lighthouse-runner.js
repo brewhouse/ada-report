@@ -93,51 +93,83 @@ export async function launchBrowser() {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH ||
     process.env.CHROME_PATH || undefined;
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    executablePath,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--no-first-run',
-      '--disable-extensions',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-translate',
-      '--hide-scrollbars',
-      '--metrics-recording-only',
-      '--mute-audio',
-      '--safebrowsing-disable-auto-update',
-    ],
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new Error('Browser launch timed out after 60 seconds')),
+      60_000
+    );
   });
 
-  return browser;
+  try {
+    const browser = await Promise.race([
+      puppeteer.launch({
+        headless: 'new',
+        executablePath,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--no-first-run',
+          '--disable-extensions',
+          '--disable-default-apps',
+          '--disable-sync',
+          '--disable-translate',
+          '--hide-scrollbars',
+          '--metrics-recording-only',
+          '--mute-audio',
+          '--safebrowsing-disable-auto-update',
+        ],
+      }),
+      timeoutPromise,
+    ]);
+    return browser;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
+
+// Hard cap per page so a hung Chrome (e.g. OOM-killed while another audit starts)
+// can't freeze the entire audit indefinitely.  5 minutes >> maxWaitForLoad (2 min).
+const LIGHTHOUSE_PAGE_TIMEOUT_MS = 5 * 60 * 1000;
 
 export async function runLighthouseAudit(url, browser) {
   const port = parseInt(new URL(browser.wsEndpoint()).port);
 
   let result;
   try {
-    result = await lighthouse(url, {
-      port,
-      onlyCategories: ['accessibility'],
-      output: 'json',
-      logLevel: 'error',
-      formFactor: 'desktop',
-      screenEmulation: {
-        mobile: false,
-        width: 1350,
-        height: 940,
-        deviceScaleFactor: 1,
-        disabled: false,
-      },
-      throttlingMethod: 'provided',
-      disableFullPageScreenshot: true,
-      maxWaitForLoad: 120000, // 120 s — allow slow/SPA/gov pages to finish loading
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error(`Lighthouse timed out after 5 minutes`)),
+        LIGHTHOUSE_PAGE_TIMEOUT_MS
+      );
     });
+    try {
+      result = await Promise.race([
+        lighthouse(url, {
+          port,
+          onlyCategories: ['accessibility'],
+          output: 'json',
+          logLevel: 'error',
+          formFactor: 'desktop',
+          screenEmulation: {
+            mobile: false,
+            width: 1350,
+            height: 940,
+            deviceScaleFactor: 1,
+            disabled: false,
+          },
+          throttlingMethod: 'provided',
+          disableFullPageScreenshot: true,
+          maxWaitForLoad: 120000, // 120 s — allow slow/SPA/gov pages to finish loading
+        }),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   } catch (err) {
     throw new Error(`Lighthouse failed for ${url}: ${err.message}`);
   } finally {
