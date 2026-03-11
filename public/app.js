@@ -108,6 +108,8 @@ let ws = null;
 let selectedPageUrl = null;
 let currentFilter = 'all';
 let currentSort = 'score-asc';
+let scanningMode = false;
+let scanLivePageCount = 0;
 
 // ===================== VIEW MANAGEMENT =====================
 
@@ -156,7 +158,11 @@ async function loadExistingAudit(auditId) {
     if (session.status === 'completed') {
       renderResults(session);
     } else if (session.status === 'crawling' || session.status === 'auditing' || session.status === 'queued') {
-      showProgress(session);
+      if (session.status === 'auditing' && session.pages && session.pages.length > 0) {
+        enterLiveResultsMode(session);
+      } else {
+        showProgress(session);
+      }
       connectWebSocket(auditId);
     } else {
       alert(`Audit ended with status: ${session.status}. ${session.error || ''}`);
@@ -289,6 +295,7 @@ function connectWebSocket(auditId) {
       renderResults(data);
     } else if (data.status === 'error') {
       saveRecentAudit(auditId, data.url, null, 'error');
+      exitScanningMode();
       alert(`Audit failed: ${data.error}`);
       initLanding();
     } else {
@@ -316,18 +323,26 @@ function showProgress(session) {
 function updateProgress(session) {
   const { status, progress, currentPage, pages } = session;
 
-  // Phase label
+  // Once pages start completing during auditing, switch to live results view
+  if (status === 'auditing' && pages && pages.length > 0) {
+    if (!scanningMode) {
+      enterLiveResultsMode(session);
+    } else {
+      updateLiveResults(session);
+    }
+    return;
+  }
+
+  // Phase label (queued / crawling)
   let phaseText = 'Waiting in queue...';
   if (status === 'crawling') phaseText = 'Discovering pages...';
   else if (status === 'auditing') phaseText = 'Auditing pages...';
   document.getElementById('progress-phase-label').textContent = phaseText;
 
-  // Current page
   if (currentPage) {
     document.getElementById('progress-current-url').textContent = `Scanning: ${currentPage}`;
   }
 
-  // Progress bar
   if (progress && progress.total > 0) {
     const pct = Math.round((progress.audited / progress.total) * 100);
     document.getElementById('progress-bar-fill').style.width = `${pct}%`;
@@ -335,7 +350,6 @@ function updateProgress(session) {
       `${progress.audited} / ${progress.total} pages audited`;
   }
 
-  // Page list (show completed pages)
   if (pages && pages.length > 0) {
     const listEl = document.getElementById('progress-page-list');
     listEl.innerHTML = pages.map(p => {
@@ -359,13 +373,124 @@ function updateProgress(session) {
         ${p.issueCount > 0 ? `<span style="font-size:11px;color:#64748b">${p.issueCount} issues</span>` : ''}
       </div>`;
     }).join('');
-    // Scroll to bottom
     listEl.scrollTop = listEl.scrollHeight;
   }
 }
 
-// Cancel button
-document.getElementById('cancel-btn').addEventListener('click', () => {
+// ===================== LIVE RESULTS DURING SCAN =====================
+
+function exitScanningMode() {
+  if (!scanningMode) return;
+  scanningMode = false;
+  scanLivePageCount = 0;
+  document.getElementById('results-scanning-banner').style.display = 'none';
+  document.querySelector('.topbar-actions').style.display = '';
+}
+
+function enterLiveResultsMode(session) {
+  scanningMode = true;
+  scanLivePageCount = 0;
+
+  showView('results');
+  document.getElementById('results-site-url').textContent = session.url;
+
+  // Show scanning banner, hide download/action buttons
+  document.getElementById('results-scanning-banner').style.display = '';
+  document.querySelector('.topbar-actions').style.display = 'none';
+
+  // Empty the page list ready for live appending
+  document.getElementById('pages-list').innerHTML = '';
+  document.getElementById('page-count-badge').textContent = '0';
+
+  // Reset summary to dashes (will fill in as pages come in)
+  drawScoreGauge(document.getElementById('score-canvas'), null);
+  ['stat-pages','stat-issues','stat-critical','stat-serious','stat-moderate','stat-minor']
+    .forEach(id => { document.getElementById(id).textContent = '—'; });
+
+  // Hide issues panel placeholder until a page is selected
+  document.getElementById('issues-placeholder').style.display = 'flex';
+  document.getElementById('issues-content').style.display = 'none';
+
+  updateLiveResults(session);
+}
+
+function updateLiveResults(session) {
+  const { progress, currentPage, pages } = session;
+
+  // Update scanning banner
+  if (progress && progress.total > 0) {
+    const pct = Math.round((progress.audited / progress.total) * 100);
+    document.getElementById('rsb-bar-fill').style.width = `${pct}%`;
+    document.getElementById('rsb-counts').textContent = `${progress.audited} / ${progress.total} pages`;
+    document.getElementById('rsb-label').textContent = `Auditing pages… ${pct}%`;
+  }
+  if (currentPage) {
+    document.getElementById('rsb-current-url').textContent = `Scanning: ${currentPage}`;
+  }
+
+  // Append only newly completed pages (avoid full re-render)
+  if (pages && pages.length > scanLivePageCount) {
+    const list = document.getElementById('pages-list');
+    const newPages = pages.slice(scanLivePageCount);
+    newPages.forEach(page => {
+      const cls = scoreClass(page.score);
+      const isError = page.status === 'error';
+      const div = document.createElement('div');
+      div.className = `page-item${isError ? ' error-item' : ''}`;
+      div.dataset.url = page.url;
+      div.innerHTML = `
+        <span class="page-score-pill ${cls}">
+          ${page.score !== null && page.score !== undefined ? page.score : 'ERR'}
+        </span>
+        <span class="page-url-text" title="${escapeHtml(page.url)}">${escapeHtml(shortUrl(page.url))}</span>
+        ${isError
+          ? `<button class="rescan-btn" data-url="${escapeHtml(page.url)}" title="Re-audit this page">↺ Rescan</button>`
+          : `<span class="page-issue-count">${page.issueCount} issues</span>`}`;
+      if (!isError) {
+        div.addEventListener('click', () => selectPage(page));
+      }
+      const rescanBtn = div.querySelector('.rescan-btn');
+      if (rescanBtn) {
+        rescanBtn.addEventListener('click', e => { e.stopPropagation(); rescanSinglePage(page.url); });
+      }
+      list.appendChild(div);
+    });
+    scanLivePageCount = pages.length;
+    list.scrollTop = list.scrollHeight;
+    document.getElementById('page-count-badge').textContent = pages.length;
+  }
+
+  // Update running summary stats from pages audited so far
+  if (pages && pages.length > 0) {
+    const completed = pages.filter(p => p.status === 'completed');
+    const scores = completed.map(p => p.score).filter(s => s !== null);
+    const allIssues = completed.flatMap(p => p.issues || []);
+    document.getElementById('stat-pages').textContent = pages.length;
+    document.getElementById('stat-issues').textContent = allIssues.length;
+    document.getElementById('stat-critical').textContent = allIssues.filter(i => i.severity === 'critical').length;
+    document.getElementById('stat-serious').textContent = allIssues.filter(i => i.severity === 'serious').length;
+    document.getElementById('stat-moderate').textContent = allIssues.filter(i => i.severity === 'moderate').length;
+    document.getElementById('stat-minor').textContent = allIssues.filter(i => i.severity === 'minor').length;
+    const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+    drawScoreGauge(document.getElementById('score-canvas'), avg);
+  }
+}
+
+// Cancel button inside scanning results view
+document.getElementById('results-cancel-btn').addEventListener('click', async () => {
+  if (currentAuditId) {
+    try { await fetch(`/api/audit/${currentAuditId}`, { method: 'DELETE' }); } catch {}
+  }
+  if (ws) { try { ws.close(); } catch {} ws = null; }
+  exitScanningMode();
+  initLanding();
+});
+
+// Cancel button (progress view)
+document.getElementById('cancel-btn').addEventListener('click', async () => {
+  if (currentAuditId) {
+    try { await fetch(`/api/audit/${currentAuditId}`, { method: 'DELETE' }); } catch {}
+  }
   if (ws) { try { ws.close(); } catch {} ws = null; }
   initLanding();
 });
@@ -373,6 +498,7 @@ document.getElementById('cancel-btn').addEventListener('click', () => {
 // ===================== RESULTS VIEW =====================
 
 function renderResults(session) {
+  exitScanningMode(); // clears scanning banner and restores action buttons if needed
   showView('results');
 
   currentSession = session;

@@ -8,6 +8,25 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,200;0,8..60,300;0,8..60,400;1,8..60,300&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Scanning-in-progress banner shown inside results view */
+    .results-scanning-banner {
+      background: #eff6ff; border-bottom: 1px solid #bfdbfe;
+      padding: 9px 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .rsb-inner { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+    .rsb-label { font-size: 13px; font-weight: 600; color: #1d4ed8; white-space: nowrap; }
+    .rsb-bar-track {
+      flex: 1; height: 6px; background: #dbeafe; border-radius: 3px;
+      min-width: 60px; max-width: 180px; overflow: hidden;
+    }
+    .rsb-bar-fill { height: 100%; background: #3b82f6; border-radius: 3px; transition: width 0.4s; }
+    .rsb-counts { font-size: 12px; color: #1d4ed8; white-space: nowrap; font-weight: 600; }
+    .rsb-current-url {
+      font-size: 11.5px; color: #475569; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; width: 100%;
+    }
+  </style>
 </head>
 <body>
 
@@ -241,6 +260,23 @@
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- Scanning-in-progress banner (shown during live scan, hidden when complete) -->
+    <div id="results-scanning-banner" class="results-scanning-banner" style="display:none">
+      <div class="rsb-inner">
+        <div class="mini-spinner" style="width:14px;height:14px;flex-shrink:0"></div>
+        <span class="rsb-label" id="rsb-label">Auditing pages…</span>
+        <div class="rsb-bar-track"><div id="rsb-bar-fill" class="rsb-bar-fill" style="width:0%"></div></div>
+        <span class="rsb-counts" id="rsb-counts"></span>
+        <button id="results-cancel-btn" class="btn-ghost btn-sm" style="margin-left:auto;flex-shrink:0">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+          Cancel
+        </button>
+      </div>
+      <div id="rsb-current-url" class="rsb-current-url"></div>
     </div>
 
     <!-- Summary Banner -->

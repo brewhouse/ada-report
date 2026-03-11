@@ -37,6 +37,9 @@ function showDashboard(schedules) {
   document.getElementById('sch-login').style.display = 'none';
   document.getElementById('sch-dashboard').style.display = '';
   renderTable(schedules);
+  loadQueue();
+  if (queuePollInterval) clearInterval(queuePollInterval);
+  queuePollInterval = setInterval(loadQueue, 5000);
 }
 
 // ===================== LOGIN =====================
@@ -455,6 +458,79 @@ function showToast(msg, isError = false) {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 4000);
 }
+
+// ===================== LIVE QUEUE =====================
+
+let queuePollInterval = null;
+
+async function loadQueue() {
+  const wrap = document.getElementById('live-queue-content');
+  try {
+    const res = await fetch('/api/queue');
+    if (!res.ok) throw new Error('Failed to load queue');
+    const { active, queued, runningAudits, maxConcurrent } = await res.json();
+
+    if (!active.length && !queued.length) {
+      wrap.innerHTML = `<div class="sch-empty" style="padding:32px 20px">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        No audits running or queued right now.
+      </div>`;
+      return;
+    }
+
+    const rows = [
+      ...active.map(a => ({ ...a, queueType: 'running' })),
+      ...queued.map(a => ({ ...a, queueType: 'queued' })),
+    ];
+
+    wrap.innerHTML = `
+      <div style="padding:10px 16px;font-size:12px;color:var(--gray-500);border-bottom:1px solid var(--border)">
+        ${runningAudits} of ${maxConcurrent} slots in use
+      </div>
+      <table class="queue-table">
+        <thead><tr>
+          <th>URL</th><th>Status</th><th>Started</th><th>Action</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(a => `<tr data-id="${escHtml(a.id)}">
+            <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(a.url)}">${escHtml(a.url)}</td>
+            <td><span class="queue-status-badge ${a.queueType === 'running' ? 'running' : 'queued'}">
+              ${a.queueType === 'running'
+                ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#3b82f6;animation:pulse 1.5s infinite"></span> ${escHtml(a.status || 'running')}`
+                : 'Queued'}
+            </span></td>
+            <td style="color:var(--gray-500)">${timeAgo(a.startTime)}</td>
+            <td><button class="queue-cancel-btn" data-id="${escHtml(a.id)}">Cancel</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+    wrap.querySelectorAll('.queue-cancel-btn').forEach(btn => {
+      btn.addEventListener('click', () => cancelAudit(btn.dataset.id, btn));
+    });
+  } catch {
+    wrap.innerHTML = `<div class="sch-empty" style="padding:32px 20px;color:#dc2626">Failed to load queue.</div>`;
+  }
+}
+
+async function cancelAudit(id, btn) {
+  if (!confirm('Cancel this audit?')) return;
+  btn.disabled = true;
+  btn.textContent = 'Cancelling…';
+  try {
+    const res = await fetch(`/api/audit/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Cancel failed');
+    showToast('Audit cancelled');
+    await loadQueue();
+  } catch (err) {
+    showToast(`Error: ${err.message}`, true);
+    btn.disabled = false;
+    btn.textContent = 'Cancel';
+  }
+}
+
+document.getElementById('queue-refresh-btn').addEventListener('click', loadQueue);
 
 // ===================== BOOT =====================
 

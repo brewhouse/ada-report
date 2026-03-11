@@ -155,7 +155,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ADA Accessibility Summary – ${escapeHtml(hostname)}</title>
+  <title>ADA Accessibility Summary – ${escapeHtml(hostname)} – ${new Date(session.startTime || Date.now()).toISOString().split('T')[0]}</title>
   <style>
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -412,7 +412,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ADA Accessibility Report – ${escapeHtml(hostname)}</title>
+  <title>ADA Accessibility Report – ${escapeHtml(hostname)} – ${new Date(session.startTime || Date.now()).toISOString().split('T')[0]}</title>
   <style>
     @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
