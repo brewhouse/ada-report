@@ -179,7 +179,7 @@ function cleanOldSessions() {
   });
 }
 
-const MAX_AUDIT_DURATION_MS = 240 * 60 * 1000; // 240-minute hard cap per audit
+const MAX_AUDIT_DURATION_MS = 480 * 60 * 1000; // 480-minute hard cap per audit
 
 async function processAuditQueue() {
   if (runningAudits >= MAX_CONCURRENT_AUDITS || auditQueue.length === 0) return;
@@ -193,7 +193,7 @@ async function processAuditQueue() {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(
-      () => reject(new Error('Audit timed out after 240 minutes')),
+      () => reject(new Error('Audit timed out after 480 minutes')),
       MAX_AUDIT_DURATION_MS
     );
   });
