@@ -8,7 +8,7 @@ import { startAudit } from './audit-manager.js';
 import { generateReport, generateSummaryReport } from './report-generator.js';
 
 const TIMEZONE = 'America/Los_Angeles';
-const AUDIT_TIMEOUT_MS = 240 * 60 * 1000; // 240 minutes
+const AUDIT_TIMEOUT_MS = 480 * 60 * 1000; // 480 minutes
 
 let schedulesFile = null;
 let reportsDir = null;
