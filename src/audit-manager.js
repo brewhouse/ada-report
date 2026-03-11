@@ -233,18 +233,20 @@ async function _runAudit(session, onUpdate) {
             lastError = error;
             console.warn(`[audit] Page error (attempt ${attempt}/2) — ${pageUrl}: ${error.message}`);
             if (attempt < 2) {
-              // The browser may be in a bad state after a hang/timeout —
-              // kill it and start fresh before retrying the page.
-              await replaceBrowser(workerIdx);
-              await new Promise(r => setTimeout(r, 2000));
+              // Short pause before retry. Do NOT replace the browser here —
+              // replacing before the retry causes a 10-60 s stall on every
+              // transient error, making other running audits appear frozen.
+              // If Chrome is truly dead it will fail fast on retry anyway.
+              await new Promise(r => setTimeout(r, 3000));
             }
           }
         }
 
         // After both attempts failed, replace the browser so the NEXT page
-        // gets a clean Chrome instance (don't let one bad page poison the worker).
+        // gets a clean Chrome instance. Cap at 20 s so a slow/failed restart
+        // never stalls the entire audit — the worker carries on regardless.
         if (lastError) {
-          await replaceBrowser(workerIdx);
+          await Promise.race([replaceBrowser(workerIdx), new Promise(r => setTimeout(r, 20_000))]);
           pageResult = {
             url: pageUrl,
             status: 'error',
