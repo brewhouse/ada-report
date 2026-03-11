@@ -201,7 +201,20 @@ async function _runAudit(session, onUpdate) {
     let pageIndex = 0;
     let auditedCount = 0;
 
-    async function auditWorker(workerBrowser) {
+    // Kill a browser by index and replace it with a fresh one.
+    // Called whenever a page error/timeout leaves Chrome in a bad state.
+    async function replaceBrowser(idx) {
+      try { browsers[idx].process()?.kill('SIGKILL'); } catch {}
+      await browsers[idx].close().catch(() => {});
+      try {
+        browsers[idx] = await launchBrowser();
+      } catch (err) {
+        console.warn(`[audit] Browser restart failed for worker ${idx}: ${err.message}`);
+      }
+    }
+
+    // Use index into browsers[] so auditWorker can replace a hung browser.
+    async function auditWorker(workerIdx) {
       while (pageIndex < pages.length) {
         const i = pageIndex++;
         if (i >= pages.length) break;
@@ -210,24 +223,28 @@ async function _runAudit(session, onUpdate) {
         onUpdate({ currentPage: pageUrl });
 
         let pageResult;
-        // Retry once on failure — transient Chrome issues, slow-loading SPA pages,
-        // and tabs left dirty from a previous error can all cause false failures.
         let lastError;
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
-            pageResult = await runLighthouseAudit(pageUrl, workerBrowser);
+            pageResult = await runLighthouseAudit(pageUrl, browsers[workerIdx]);
             lastError = null;
             break;
           } catch (error) {
             lastError = error;
+            console.warn(`[audit] Page error (attempt ${attempt}/2) — ${pageUrl}: ${error.message}`);
             if (attempt < 2) {
-              // Give Chrome 4 s to settle before retrying
-              await new Promise(r => setTimeout(r, 4000));
+              // The browser may be in a bad state after a hang/timeout —
+              // kill it and start fresh before retrying the page.
+              await replaceBrowser(workerIdx);
+              await new Promise(r => setTimeout(r, 2000));
             }
           }
         }
 
+        // After both attempts failed, replace the browser so the NEXT page
+        // gets a clean Chrome instance (don't let one bad page poison the worker).
         if (lastError) {
+          await replaceBrowser(workerIdx);
           pageResult = {
             url: pageUrl,
             status: 'error',
@@ -241,7 +258,6 @@ async function _runAudit(session, onUpdate) {
 
         auditedPages[i] = pageResult;
         auditedCount++;
-        // Emit single page rather than full pages array on every update (avoids O(n²) work)
         onUpdate({
           completedPage: pageResult,
           progress: {
@@ -253,7 +269,7 @@ async function _runAudit(session, onUpdate) {
       }
     }
 
-    await Promise.all(browsers.map(b => auditWorker(b)));
+    await Promise.all(browsers.map((_, idx) => auditWorker(idx)));
 
     // Phase 4: Compute summary
     const completed = auditedPages.filter(p => p && p.status === 'completed');
@@ -288,8 +304,6 @@ async function _runAudit(session, onUpdate) {
     });
 
   } finally {
-    await Promise.all(browsers.map(b => b.close().catch((err) => {
-      if (process.env.DEBUG) console.warn('Browser close error:', err.message);
-    })));
+    await Promise.all(browsers.map(b => b?.close().catch(() => {})));
   }
 }

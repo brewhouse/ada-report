@@ -173,17 +173,23 @@ export async function runLighthouseAudit(url, browser) {
   } catch (err) {
     throw new Error(`Lighthouse failed for ${url}: ${err.message}`);
   } finally {
-    // Always close extra tabs — even when Lighthouse throws — so the browser
-    // stays clean for the next page.
-    try {
-      const openPages = await browser.pages();
-      for (const page of openPages) {
-        const pageUrl = page.url();
-        if (pageUrl !== 'about:blank' && pageUrl !== '') {
-          await page.close().catch(() => {});
-        }
-      }
-    } catch {}
+    // Close extra tabs so the browser stays clean for the next page.
+    // Cap at 10 s — if Chrome is stuck (e.g. a hung page), browser.pages()
+    // or page.close() can itself hang forever, freezing the entire audit.
+    await Promise.race([
+      (async () => {
+        try {
+          const openPages = await browser.pages();
+          for (const page of openPages) {
+            const pageUrl = page.url();
+            if (pageUrl !== 'about:blank' && pageUrl !== '') {
+              await page.close().catch(() => {});
+            }
+          }
+        } catch {}
+      })(),
+      new Promise(r => setTimeout(r, 10_000)),
+    ]);
   }
 
   const lhr = result.lhr;
