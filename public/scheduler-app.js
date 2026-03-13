@@ -478,6 +478,21 @@ async function loadQueue() {
       return;
     }
 
+    // Fetch progress for each active audit in parallel
+    const progressMap = {};
+    await Promise.all(active.map(async a => {
+      try {
+        const r = await fetch(`/api/audit/${a.id}`);
+        if (r.ok) {
+          const d = await r.json();
+          const p = d.progress || {};
+          const audited = p.audited || 0;
+          const total = p.total || 0;
+          progressMap[a.id] = { audited, total, pct: total > 0 ? Math.round(audited / total * 100) : 0 };
+        }
+      } catch { /* ignore */ }
+    }));
+
     const rows = [
       ...active.map(a => ({ ...a, queueType: 'running' })),
       ...queued.map(a => ({ ...a, queueType: 'queued' })),
@@ -489,19 +504,32 @@ async function loadQueue() {
       </div>
       <table class="queue-table">
         <thead><tr>
-          <th>URL</th><th>Status</th><th>Started</th><th>Action</th>
+          <th>URL</th><th>Status</th><th>Progress</th><th>Started</th><th>Action</th>
         </tr></thead>
         <tbody>
-          ${rows.map(a => `<tr data-id="${escHtml(a.id)}">
-            <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(a.url)}">${escHtml(a.url)}</td>
-            <td><span class="queue-status-badge ${a.queueType === 'running' ? 'running' : 'queued'}">
-              ${a.queueType === 'running'
-                ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#3b82f6;animation:pulse 1.5s infinite"></span> ${escHtml(a.status || 'running')}`
-                : 'Queued'}
-            </span></td>
-            <td style="color:var(--gray-500)">${timeAgo(a.startTime)}</td>
-            <td><button class="queue-cancel-btn" data-id="${escHtml(a.id)}">Cancel</button></td>
-          </tr>`).join('')}
+          ${rows.map(a => {
+            const prog = progressMap[a.id];
+            const progressCell = prog
+              ? `<div style="display:flex;align-items:center;gap:8px;min-width:140px">
+                   <div style="flex:1;height:6px;background:#dbeafe;border-radius:3px;overflow:hidden">
+                     <div style="width:${prog.pct}%;height:100%;background:#3b82f6;border-radius:3px;transition:width 0.4s"></div>
+                   </div>
+                   <span style="font-size:12px;font-weight:600;color:#1d4ed8;white-space:nowrap">${prog.pct}%</span>
+                   <span style="font-size:11px;color:var(--gray-500);white-space:nowrap">${prog.audited}/${prog.total}</span>
+                 </div>`
+              : `<span style="font-size:12px;color:var(--gray-400)">—</span>`;
+            return `<tr data-id="${escHtml(a.id)}">
+              <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(a.url)}">${escHtml(a.url)}</td>
+              <td><span class="queue-status-badge ${a.queueType === 'running' ? 'running' : 'queued'}">
+                ${a.queueType === 'running'
+                  ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#3b82f6;animation:pulse 1.5s infinite"></span> ${escHtml(a.status || 'running')}`
+                  : 'Queued'}
+              </span></td>
+              <td>${progressCell}</td>
+              <td style="color:var(--gray-500)">${timeAgo(a.startTime)}</td>
+              <td><button class="queue-cancel-btn" data-id="${escHtml(a.id)}">Cancel</button></td>
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>`;
 
