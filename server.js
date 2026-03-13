@@ -647,14 +647,20 @@ app.delete('/api/audit/:id', (req, res) => {
   }
 
   // Remove from queue if it hasn't started yet
+  let wasDequeued = false;
   if (wasQueued) {
     const idx = auditQueue.findIndex(({ session: s }) => s.id === session.id);
-    if (idx >= 0) auditQueue.splice(idx, 1);
+    if (idx >= 0) {
+      auditQueue.splice(idx, 1);
+    } else {
+      // Already dequeued (runningAudits was incremented) but status not yet updated — holds a slot
+      wasDequeued = true;
+    }
   }
 
   // Mark as cancelled — set flag BEFORE updating status so the processAuditQueue
   // onUpdate guard sees it and stops overwriting the session state.
-  if (wasActive) session._cancelledExternally = true;
+  if (wasActive || wasDequeued) session._cancelledExternally = true;
 
   session.status = 'error';
   session.error = 'Cancelled by user';
@@ -663,7 +669,7 @@ app.delete('/api/audit/:id', (req, res) => {
 
   // Release the running slot so the queue can proceed.
   // processAuditQueue's finally block will see _cancelledExternally and skip its own release.
-  if (wasActive) {
+  if (wasActive || wasDequeued) {
     runningAudits = Math.max(0, runningAudits - 1);
     forceReleaseGlobalSlot();
     processAuditQueue();
