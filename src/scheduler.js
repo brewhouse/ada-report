@@ -5,7 +5,7 @@ import { join } from 'path';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit } from './audit-manager.js';
-import { generateReport, generateSummaryReport } from './report-generator.js';
+import { generateReport, generateSummaryReport, generateVpatReport } from './report-generator.js';
 
 const TIMEZONE = 'America/Los_Angeles';
 const AUDIT_TIMEOUT_MS = 480 * 60 * 1000; // 480 minutes
@@ -126,8 +126,11 @@ async function sendReport(session, schedule) {
     return;
   }
 
-  const html = generateSummaryReport(session, schedule.brand || null, false);
-  const pdfBuffer = await generatePdfBuffer(html);
+  const brand = schedule.brand || null;
+  const [summaryPdf, vpatPdf] = await Promise.all([
+    generatePdfBuffer(generateSummaryReport(session, brand, false)),
+    generatePdfBuffer(generateVpatReport(session, brand, false)),
+  ]);
 
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
@@ -163,15 +166,22 @@ async function sendReport(session, schedule) {
               <td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
         </table>
         <p style="font-size:12px;color:#94a3b8;margin-top:32px;">
-          Scheduled report by Planeteria Inquiros ADA Checker &bull; Powered by Google Lighthouse
+          Scheduled report by Planeteria Inquiros ADA Checker &bull; Powered by Google Lighthouse, Axe Tools &amp; IBM Equal Access Checker
         </p>
       </div>
     `,
-    attachments: [{
-      filename: `accessibility-summary-${domain}-${date}.pdf`,
-      content:  pdfBuffer,
-      contentType: 'application/pdf',
-    }],
+    attachments: [
+      {
+        filename: `accessibility-summary-${domain}-${date}.pdf`,
+        content:  summaryPdf,
+        contentType: 'application/pdf',
+      },
+      {
+        filename: `vpat-report-${domain}-${date}.pdf`,
+        content:  vpatPdf,
+        contentType: 'application/pdf',
+      },
+    ],
   });
 
   console.log(`[scheduler] Report emailed to ${schedule.emails.join(', ')} for ${schedule.url}`);
