@@ -235,7 +235,7 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
       return { label: 'Not Applicable', color: '#475569', bg: '#f1f5f9', border: '#94a3b8' };
     }
     if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
-      return { label: 'Not Evaluated', color: '#64748b', bg: '#f8fafc', border: '#cbd5e1' };
+      return { label: 'Not Evaluated', color: '#92400e', bg: '#fffbeb', border: '#d97706' };
     }
     const data = issuesByWcag[wcagId];
     if (!data) {
@@ -251,6 +251,9 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
   }
 
   function getRemarks(wcagId) {
+    if (NOT_APPLICABLE_WCAG.has(wcagId)) {
+      return `The criterion is not relevant to this product.`;
+    }
     if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
       return `<em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em>`;
     }
@@ -292,6 +295,7 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #1e293b; background: #fff; line-height: 1.5; }
     .page { max-width: 900px; margin: 0 auto; padding: 14px 18px; }
+    @media print { .page { padding: 12mm 14mm; } }
     .vpat-header { display: flex; align-items: center; gap: 16px; padding-bottom: 10px; border-bottom: 3px solid ${accentColor}; margin-bottom: 14px; }
     .vpat-header-text .title { font-size: 17px; font-weight: 700; color: #0f172a; }
     .vpat-header-text .subtitle { font-size: 10px; color: #64748b; margin-top: 1px; }
@@ -316,7 +320,6 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
     .print-btn:hover { opacity: 0.9; }
     @media print {
       .print-btn { display: none; }
-      .page { padding: 0; }
       .criteria-tbl { page-break-inside: auto; }
       h2 { page-break-after: avoid; }
       tr { page-break-inside: avoid; }
@@ -343,12 +346,12 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
       <tr><td>Report Date</td><td>${escapeHtml(auditDateShort)}</td></tr>
       <tr><td>Version</td><td>Live website evaluated on ${escapeHtml(auditDateShort)}</td></tr>
       <tr><td>Vendor / Evaluator</td><td>${escapeHtml(brandName)}</td></tr>
-      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse, axe-core, and IBM Equal Access Checker. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
+      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse, Axe Tools, and IBM Equal Access Checker. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
     </table>
 
     <!-- Evaluation Methods -->
     <h2>Evaluation Methods Used</h2>
-    <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>axe-core</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
+    <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>Axe Tools</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
     <p style="margin-top:5px;">Overall results: Average score <strong>${summary?.averageScore ?? 'N/A'}/100</strong> &bull; ${(summary?.totalIssues ?? 0).toLocaleString()} total issues found &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
 
     <!-- Applicable Standards -->
@@ -366,7 +369,7 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
       <li><strong style="color:#b45309">Partially Supports</strong> &mdash; Some functionality does not meet the criterion.</li>
       <li><strong style="color:#dc2626">Does Not Support</strong> &mdash; The majority of product functionality does not meet the criterion.</li>
       <li><strong style="color:#475569">Not Applicable</strong> &mdash; The criterion is not relevant to this product.</li>
-      <li><strong style="color:#64748b">Not Evaluated</strong> &mdash; Not evaluated via automated testing; manual review recommended.</li>
+      <li><strong style="color:#92400e">Not Evaluated</strong> &mdash; Not evaluated via automated testing; manual review recommended.</li>
     </ul>
 
     <!-- Table 1: Level A -->
@@ -397,11 +400,11 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
 
     <!-- Legal Disclaimer -->
     <div class="disclaimer">
-      <strong>Legal Disclaimer:</strong> "Voluntary Product Accessibility Template" and "VPAT" are registered service marks of the Information Technology Industry Council (ITI). This report was generated using automated accessibility testing via Google Lighthouse, axe-core, and IBM Equal Access Checker, and covers only criteria detectable by automated means. "Supports" indicates no automated issues were detected and does not constitute a guarantee of full WCAG conformance. Manual testing by qualified accessibility professionals is recommended for a complete conformance assessment. This report reflects the state of the website as of ${escapeHtml(auditDateShort)}.
+      <strong>Legal Disclaimer:</strong> "Voluntary Product Accessibility Template" and "VPAT" are registered service marks of the Information Technology Industry Council (ITI). This report was generated using automated accessibility testing via Google Lighthouse, Axe Tools, and IBM Equal Access Checker, and covers only criteria detectable by automated means. "Supports" indicates no automated issues were detected and does not constitute a guarantee of full WCAG conformance. Manual testing by qualified accessibility professionals is recommended for a complete conformance assessment. This report reflects the state of the website as of ${escapeHtml(auditDateShort)}.
     </div>
 
     <div class="footer">
-      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse, axe-core &amp; IBM Equal Access Checker &bull; ${escapeHtml(auditDate)}
+      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse, Axe Tools &amp; IBM Equal Access Checker &bull; ${escapeHtml(auditDate)}
     </div>
   </div>
   ${autoprint ? `<script>window.addEventListener('load', function(){ setTimeout(window.print, 900); });</script>` : ''}
