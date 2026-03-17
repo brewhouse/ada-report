@@ -219,7 +219,21 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
     }
   }
 
+  // Criteria that are Not Applicable to general websites (no live media, no custom
+  // single-key shortcuts, no flashing content, no multi-point gestures, no motion input)
+  const NOT_APPLICABLE_WCAG = new Set([
+    '1.2.4', // Captions (Live) — only applies to live audio/video streams
+    '2.1.4', // Character Key Shortcuts — only applies if single-key shortcuts are implemented
+    '2.3.1', // Three Flashes — only applies if the page contains flashing content
+    '2.5.1', // Pointer Gestures — only applies if multi-point or path-based gestures are used
+    '2.5.2', // Pointer Cancellation — only applies if pointer down events trigger actions
+    '2.5.4', // Motion Actuation — only applies if device motion/orientation is used for input
+  ]);
+
   function getConformance(wcagId) {
+    if (NOT_APPLICABLE_WCAG.has(wcagId)) {
+      return { label: 'Not Applicable', color: '#475569', bg: '#f1f5f9', border: '#94a3b8' };
+    }
     if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
       return { label: 'Not Evaluated', color: '#64748b', bg: '#f8fafc', border: '#cbd5e1' };
     }
@@ -274,7 +288,7 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VPAT Report \u2013 ${escapeHtml(hostname)} \u2013 ${new Date(startTime || Date.now()).toISOString().split('T')[0]}</title>
   <style>
-    @page { size: A4 portrait; margin: 12mm; }
+    @page { size: A4 portrait; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #1e293b; background: #fff; line-height: 1.5; }
     .page { max-width: 900px; margin: 0 auto; padding: 14px 18px; }
@@ -329,12 +343,12 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
       <tr><td>Report Date</td><td>${escapeHtml(auditDateShort)}</td></tr>
       <tr><td>Version</td><td>Live website evaluated on ${escapeHtml(auditDateShort)}</td></tr>
       <tr><td>Vendor / Evaluator</td><td>${escapeHtml(brandName)}</td></tr>
-      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
+      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse, axe-core, and IBM Equal Access Checker. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
     </table>
 
     <!-- Evaluation Methods -->
     <h2>Evaluation Methods Used</h2>
-    <p>Automated accessibility testing using <strong>Google Lighthouse</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
+    <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>axe-core</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
     <p style="margin-top:5px;">Overall results: Average score <strong>${summary?.averageScore ?? 'N/A'}/100</strong> &bull; ${(summary?.totalIssues ?? 0).toLocaleString()} total issues found &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
 
     <!-- Applicable Standards -->
@@ -383,11 +397,11 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
 
     <!-- Legal Disclaimer -->
     <div class="disclaimer">
-      <strong>Legal Disclaimer:</strong> "Voluntary Product Accessibility Template" and "VPAT" are registered service marks of the Information Technology Industry Council (ITI). This report was generated using automated accessibility testing via Google Lighthouse and covers only criteria detectable by automated means. "Supports" indicates no automated issues were detected and does not constitute a guarantee of full WCAG conformance. Manual testing by qualified accessibility professionals is recommended for a complete conformance assessment. This report reflects the state of the website as of ${escapeHtml(auditDateShort)}.
+      <strong>Legal Disclaimer:</strong> "Voluntary Product Accessibility Template" and "VPAT" are registered service marks of the Information Technology Industry Council (ITI). This report was generated using automated accessibility testing via Google Lighthouse, axe-core, and IBM Equal Access Checker, and covers only criteria detectable by automated means. "Supports" indicates no automated issues were detected and does not constitute a guarantee of full WCAG conformance. Manual testing by qualified accessibility professionals is recommended for a complete conformance assessment. This report reflects the state of the website as of ${escapeHtml(auditDateShort)}.
     </div>
 
     <div class="footer">
-      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse &bull; ${escapeHtml(auditDate)}
+      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse, axe-core &amp; IBM Equal Access Checker &bull; ${escapeHtml(auditDate)}
     </div>
   </div>
   ${autoprint ? `<script>window.addEventListener('load', function(){ setTimeout(window.print, 900); });</script>` : ''}
