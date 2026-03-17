@@ -107,6 +107,294 @@ function renderIssuesTable(issues) {
   `).join('');
 }
 
+// ─── VPAT Report Generator ─────────────────────────────────────────────────────
+
+// All WCAG 2.1 criteria included in the VPAT (Levels A and AA)
+const WCAG_21_CRITERIA_A = [
+  { id: '1.1.1',  name: 'Non-text Content' },
+  { id: '1.2.1',  name: 'Audio-only and Video-only (Prerecorded)' },
+  { id: '1.2.2',  name: 'Captions (Prerecorded)' },
+  { id: '1.2.3',  name: 'Audio Description or Media Alternative (Prerecorded)' },
+  { id: '1.3.1',  name: 'Info and Relationships' },
+  { id: '1.3.2',  name: 'Meaningful Sequence' },
+  { id: '1.3.3',  name: 'Sensory Characteristics' },
+  { id: '1.4.1',  name: 'Use of Color' },
+  { id: '1.4.2',  name: 'Audio Control' },
+  { id: '2.1.1',  name: 'Keyboard' },
+  { id: '2.1.2',  name: 'No Keyboard Trap' },
+  { id: '2.1.4',  name: 'Character Key Shortcuts' },
+  { id: '2.2.1',  name: 'Timing Adjustable' },
+  { id: '2.2.2',  name: 'Pause, Stop, Hide' },
+  { id: '2.3.1',  name: 'Three Flashes or Below Threshold' },
+  { id: '2.4.1',  name: 'Bypass Blocks' },
+  { id: '2.4.2',  name: 'Page Titled' },
+  { id: '2.4.3',  name: 'Focus Order' },
+  { id: '2.4.4',  name: 'Link Purpose (In Context)' },
+  { id: '2.5.1',  name: 'Pointer Gestures' },
+  { id: '2.5.2',  name: 'Pointer Cancellation' },
+  { id: '2.5.3',  name: 'Label in Name' },
+  { id: '2.5.4',  name: 'Motion Actuation' },
+  { id: '3.1.1',  name: 'Language of Page' },
+  { id: '3.2.1',  name: 'On Focus' },
+  { id: '3.2.2',  name: 'On Input' },
+  { id: '3.3.1',  name: 'Error Identification' },
+  { id: '3.3.2',  name: 'Labels or Instructions' },
+  { id: '4.1.1',  name: 'Parsing' },
+  { id: '4.1.2',  name: 'Name, Role, Value' },
+];
+
+const WCAG_21_CRITERIA_AA = [
+  { id: '1.2.4',  name: 'Captions (Live)' },
+  { id: '1.2.5',  name: 'Audio Description (Prerecorded)' },
+  { id: '1.3.4',  name: 'Orientation' },
+  { id: '1.3.5',  name: 'Identify Input Purpose' },
+  { id: '1.4.3',  name: 'Contrast (Minimum)' },
+  { id: '1.4.4',  name: 'Resize Text' },
+  { id: '1.4.5',  name: 'Images of Text' },
+  { id: '1.4.10', name: 'Reflow' },
+  { id: '1.4.11', name: 'Non-text Contrast' },
+  { id: '1.4.12', name: 'Text Spacing' },
+  { id: '1.4.13', name: 'Content on Hover or Focus' },
+  { id: '2.4.5',  name: 'Multiple Ways' },
+  { id: '2.4.6',  name: 'Headings and Labels' },
+  { id: '2.4.7',  name: 'Focus Visible' },
+  { id: '3.1.2',  name: 'Language of Parts' },
+  { id: '3.2.3',  name: 'Consistent Navigation' },
+  { id: '3.2.4',  name: 'Consistent Identification' },
+  { id: '3.3.3',  name: 'Error Suggestion' },
+  { id: '3.3.4',  name: 'Error Prevention (Legal, Financial, Data)' },
+  { id: '4.1.3',  name: 'Status Messages' },
+];
+
+// WCAG criteria evaluated by Lighthouse + axe-core + IBM Equal Access Checker
+const LIGHTHOUSE_TESTED_WCAG = new Set([
+  // Lighthouse
+  '1.1.1', '1.2.1', '1.2.2', '1.3.1', '1.3.2', '1.3.3',
+  '2.1.1', '2.1.2', '2.2.1', '2.4.1', '2.4.2', '2.4.3', '2.4.4', '2.5.3',
+  '3.1.1', '4.1.1', '4.1.2',
+  '1.4.3', '1.4.4', '3.1.2',
+  // axe-core (new criteria not covered by Lighthouse)
+  '1.3.4', '1.3.5', '1.4.1', '1.4.2', '1.4.12', '2.2.2', '3.3.2',
+  // IBM Equal Access Checker (new criteria not covered by Lighthouse or axe)
+  '2.4.7', '1.4.13', '3.2.1', '3.2.2', '3.3.1', '1.4.10',
+]);
+
+export function generateVpatReport(session, brandKey = null, autoprint = false) {
+  const brand = BRANDS[brandKey] || null;
+  const accentColor = brand?.accentColor || '#107DC2';
+  const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
+
+  const { url, summary, pages, startTime } = session;
+  const hostname = new URL(url).hostname;
+  const auditDate = new Date(startTime).toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+  const auditDateShort = new Date(startTime).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric',
+  });
+
+  const completedPages = pages.filter(p => p.status === 'completed');
+  const totalAudited = completedPages.length;
+
+  // Aggregate issues by WCAG criterion across all pages
+  const issuesByWcag = {};
+  for (const page of completedPages) {
+    const pageWcagSeen = new Set();
+    for (const issue of (page.issues || [])) {
+      const key = issue.wcag;
+      if (!key || key === 'N/A') continue;
+      if (!issuesByWcag[key]) {
+        issuesByWcag[key] = { pageCount: 0, totalElements: 0, severity: issue.severity, titles: new Set() };
+      }
+      if (!pageWcagSeen.has(key)) {
+        issuesByWcag[key].pageCount++;
+        pageWcagSeen.add(key);
+      }
+      issuesByWcag[key].totalElements += issue.count || 1;
+      issuesByWcag[key].titles.add(issue.title);
+      const SEV = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+      if ((SEV[issue.severity] ?? 2) < (SEV[issuesByWcag[key].severity] ?? 2)) {
+        issuesByWcag[key].severity = issue.severity;
+      }
+    }
+  }
+
+  function getConformance(wcagId) {
+    if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
+      return { label: 'Not Evaluated', color: '#64748b', bg: '#f8fafc', border: '#cbd5e1' };
+    }
+    const data = issuesByWcag[wcagId];
+    if (!data) {
+      return { label: 'Supports', color: '#16a34a', bg: '#f0fdf4', border: '#86efac' };
+    }
+    const SEV = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+    const sev = SEV[data.severity] ?? 2;
+    const ratio = data.pageCount / Math.max(totalAudited, 1);
+    if (sev <= 1 && ratio >= 0.25) {
+      return { label: 'Does Not Support', color: '#dc2626', bg: '#fef2f2', border: '#fca5a5' };
+    }
+    return { label: 'Partially Supports', color: '#b45309', bg: '#fffbeb', border: '#fcd34d' };
+  }
+
+  function getRemarks(wcagId) {
+    if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
+      return `<em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em>`;
+    }
+    const data = issuesByWcag[wcagId];
+    if (!data) {
+      return `No issues detected across ${totalAudited.toLocaleString()} pages audited.`;
+    }
+    const titles = Array.from(data.titles).map(t => escapeHtml(t)).join('; ');
+    const plural = data.pageCount === 1 ? 'page' : 'pages';
+    return `Issues detected on <strong>${data.pageCount}</strong> of ${totalAudited.toLocaleString()} ${plural}. `
+      + `<br><strong>Issues:</strong> ${titles}. `
+      + `<br><strong>Elements affected:</strong> ${data.totalElements.toLocaleString()}.`;
+  }
+
+  function renderCriteriaRows(criteria, level) {
+    return criteria.map(c => {
+      const conf = getConformance(c.id);
+      const remarks = getRemarks(c.id);
+      return `<tr>
+        <td class="c-criteria"><strong>${c.id}</strong> ${escapeHtml(c.name)}<br><span style="font-size:9px;color:#64748b">Level ${level}</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:${conf.color};background:${conf.bg};border-color:${conf.border}">${conf.label}</span></td>
+        <td class="c-remarks">${remarks}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const coverLogo = brand
+    ? `<img src="${brand.logoUrl}" alt="${escapeHtml(brand.name)}" style="max-height:36px;max-width:160px;object-fit:contain;">`
+    : `<span style="font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:${accentColor}">${escapeHtml(brandName)}</span>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VPAT Report \u2013 ${escapeHtml(hostname)} \u2013 ${new Date(startTime || Date.now()).toISOString().split('T')[0]}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #1e293b; background: #fff; line-height: 1.5; }
+    .page { max-width: 900px; margin: 0 auto; padding: 14px 18px; }
+    .vpat-header { display: flex; align-items: center; gap: 16px; padding-bottom: 10px; border-bottom: 3px solid ${accentColor}; margin-bottom: 14px; }
+    .vpat-header-text .title { font-size: 17px; font-weight: 700; color: #0f172a; }
+    .vpat-header-text .subtitle { font-size: 10px; color: #64748b; margin-top: 1px; }
+    h2 { font-size: 12px; font-weight: 700; color: #0f172a; margin: 12px 0 5px; padding-bottom: 3px; border-bottom: 2px solid #e2e8f0; }
+    .info-tbl { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; }
+    .info-tbl td { padding: 5px 10px; border: 1px solid #e2e8f0; vertical-align: top; }
+    .info-tbl td:first-child { font-weight: 600; background: #f8fafc; width: 30%; color: #475569; white-space: nowrap; }
+    .terms-list { list-style: none; font-size: 11px; margin: 6px 0 10px; }
+    .terms-list li { padding: 3px 0 3px 10px; border-left: 3px solid #e2e8f0; margin-bottom: 3px; }
+    .criteria-tbl { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0 14px; }
+    .criteria-tbl thead tr { background: ${accentColor}; color: #fff; }
+    .criteria-tbl thead th { padding: 6px 10px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .criteria-tbl tbody tr { border-bottom: 1px solid #e2e8f0; }
+    .criteria-tbl tbody tr:nth-child(even) { background: #f8fafc; }
+    .c-criteria { padding: 6px 10px; width: 36%; vertical-align: top; }
+    .c-conf { padding: 6px 10px; width: 20%; vertical-align: top; text-align: center; }
+    .conf-pill { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 9px; font-weight: 700; border: 1px solid; white-space: nowrap; }
+    .c-remarks { padding: 6px 10px; width: 44%; vertical-align: top; font-size: 10px; color: #475569; }
+    .disclaimer { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px 12px; font-size: 10px; color: #64748b; margin-top: 14px; }
+    .footer { text-align: center; font-size: 9px; color: #94a3b8; margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+    .print-btn { position: fixed; top: 16px; right: 16px; background: ${accentColor}; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
+    .print-btn:hover { opacity: 0.9; }
+    @media print {
+      .print-btn { display: none; }
+      .page { padding: 0; }
+      .criteria-tbl { page-break-inside: auto; }
+      h2 { page-break-after: avoid; }
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">Print / Save PDF</button>
+  <div class="page">
+
+    <!-- Header -->
+    <div class="vpat-header">
+      <div>${coverLogo}</div>
+      <div class="vpat-header-text">
+        <div class="title">Accessibility Conformance Report</div>
+        <div class="subtitle">WCAG Edition &mdash; Based on VPAT&reg; Version 2.4</div>
+      </div>
+    </div>
+
+    <!-- Product Information -->
+    <h2>Product Information</h2>
+    <table class="info-tbl">
+      <tr><td>Product / Service Name</td><td>${escapeHtml(url)}</td></tr>
+      <tr><td>Report Date</td><td>${escapeHtml(auditDateShort)}</td></tr>
+      <tr><td>Version</td><td>Live website evaluated on ${escapeHtml(auditDateShort)}</td></tr>
+      <tr><td>Vendor / Evaluator</td><td>${escapeHtml(brandName)}</td></tr>
+      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
+    </table>
+
+    <!-- Evaluation Methods -->
+    <h2>Evaluation Methods Used</h2>
+    <p>Automated accessibility testing using <strong>Google Lighthouse</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
+    <p style="margin-top:5px;">Overall results: Average score <strong>${summary?.averageScore ?? 'N/A'}/100</strong> &bull; ${(summary?.totalIssues ?? 0).toLocaleString()} total issues found &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
+
+    <!-- Applicable Standards -->
+    <h2>Applicable Standards / Guidelines</h2>
+    <table class="info-tbl">
+      <tr><td>Standard / Guideline</td><td>Included In Report</td></tr>
+      <tr><td>Web Content Accessibility Guidelines 2.1</td><td>Level A (Yes) &bull; Level AA (Yes) &bull; Level AAA (No)</td></tr>
+    </table>
+
+    <!-- Terms -->
+    <h2>Terms</h2>
+    <p>Conformance level definitions as used in this report:</p>
+    <ul class="terms-list">
+      <li><strong style="color:#16a34a">Supports</strong> &mdash; No automated issues detected; the product meets the criterion or an equivalent method exists.</li>
+      <li><strong style="color:#b45309">Partially Supports</strong> &mdash; Some functionality does not meet the criterion.</li>
+      <li><strong style="color:#dc2626">Does Not Support</strong> &mdash; The majority of product functionality does not meet the criterion.</li>
+      <li><strong style="color:#475569">Not Applicable</strong> &mdash; The criterion is not relevant to this product.</li>
+      <li><strong style="color:#64748b">Not Evaluated</strong> &mdash; Not evaluated via automated testing; manual review recommended.</li>
+    </ul>
+
+    <!-- Table 1: Level A -->
+    <h2>WCAG 2.1 Table 1 &mdash; Level A Success Criteria</h2>
+    <table class="criteria-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Criteria</th>
+          <th style="width:20%">Conformance Level</th>
+          <th style="width:44%">Remarks and Explanations</th>
+        </tr>
+      </thead>
+      <tbody>${renderCriteriaRows(WCAG_21_CRITERIA_A, 'A')}</tbody>
+    </table>
+
+    <!-- Table 2: Level AA -->
+    <h2>WCAG 2.1 Table 2 &mdash; Level AA Success Criteria</h2>
+    <table class="criteria-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Criteria</th>
+          <th style="width:20%">Conformance Level</th>
+          <th style="width:44%">Remarks and Explanations</th>
+        </tr>
+      </thead>
+      <tbody>${renderCriteriaRows(WCAG_21_CRITERIA_AA, 'AA')}</tbody>
+    </table>
+
+    <!-- Legal Disclaimer -->
+    <div class="disclaimer">
+      <strong>Legal Disclaimer:</strong> "Voluntary Product Accessibility Template" and "VPAT" are registered service marks of the Information Technology Industry Council (ITI). This report was generated using automated accessibility testing via Google Lighthouse and covers only criteria detectable by automated means. "Supports" indicates no automated issues were detected and does not constitute a guarantee of full WCAG conformance. Manual testing by qualified accessibility professionals is recommended for a complete conformance assessment. This report reflects the state of the website as of ${escapeHtml(auditDateShort)}.
+    </div>
+
+    <div class="footer">
+      Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse &bull; ${escapeHtml(auditDate)}
+    </div>
+  </div>
+  ${autoprint ? `<script>window.addEventListener('load', function(){ setTimeout(window.print, 900); });</script>` : ''}
+</body>
+</html>`;
+}
+
 // brandKey: 'planeteria' | 'digitaldeployment' | 'pensionx' | null
 // autoprint: if true, adds a window.print() call on load
 export function generateSummaryReport(session, brandKey = null, autoprint = false) {

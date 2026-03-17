@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit, rescanPage, forceReleaseGlobalSlot } from './src/audit-manager.js';
-import { generateReport, generateSummaryReport } from './src/report-generator.js';
+import { generateReport, generateSummaryReport, generateVpatReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
 import {
   initScheduler, getSchedules, addSchedule,
@@ -382,6 +382,28 @@ app.get('/api/audit/:id/report', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (!autoprint) {
     res.setHeader('Content-Disposition', `attachment; filename="accessibility-report-${domain}-${date}.html"`);
+  }
+  res.send(reportHtml);
+});
+
+// Download VPAT conformance report
+app.get('/api/audit/:id/report/vpat', (req, res) => {
+  const session = auditSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+  if (session.status !== 'completed') {
+    return res.status(400).json({ error: 'Audit not yet completed' });
+  }
+
+  const brand = req.query.brand || null;
+  const autoprint = req.query.autoprint === 'true';
+  const reportHtml = generateVpatReport(session, brand, autoprint);
+
+  const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+  const date = new Date().toISOString().split('T')[0];
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  if (!autoprint) {
+    res.setHeader('Content-Disposition', `attachment; filename="vpat-report-${domain}-${date}.html"`);
   }
   res.send(reportHtml);
 });

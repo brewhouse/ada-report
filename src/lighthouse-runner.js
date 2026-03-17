@@ -1,5 +1,55 @@
 import puppeteer from 'puppeteer';
 import lighthouse from 'lighthouse';
+import { readFileSync } from 'fs';
+import { createRequire } from 'module';
+
+const _require = createRequire(import.meta.url);
+// Load axe-core browser bundle once at startup
+const axeSource = readFileSync(_require.resolve('axe-core/axe.min.js'), 'utf8');
+// Load IBM Equal Access Checker engine once at startup (browser-injectable bundle)
+const ibmAceSource = readFileSync(
+  new URL('../node_modules/accessibility-checker-engine/ace.js', import.meta.url),
+  'utf8'
+);
+
+// axe-core rules that cover WCAG criteria Lighthouse does NOT test,
+// plus supplemental checks for criteria Lighthouse tests with fewer rules.
+// Rules already handled by Lighthouse are intentionally excluded to avoid duplicates.
+const AXE_WCAG_MAPPING = {
+  // ── NEW criteria (not covered by Lighthouse at all) ──────────────────────
+  'autocomplete-valid':      { wcag: '1.3.5', level: 'AA', severity: 'serious'  },
+  'avoid-inline-spacing':    { wcag: '1.4.12', level: 'AA', severity: 'serious'  },
+  'blink':                   { wcag: '2.2.2', level: 'A',  severity: 'serious'  },
+  'css-orientation-lock':    { wcag: '1.3.4', level: 'AA', severity: 'serious'  },
+  'link-in-text-block':      { wcag: '1.4.1', level: 'A',  severity: 'serious'  },
+  'marquee':                 { wcag: '2.2.2', level: 'A',  severity: 'serious'  },
+  'no-autoplay-audio':       { wcag: '1.4.2', level: 'A',  severity: 'serious'  },
+  // ── Supplemental checks for existing WCAG criteria ───────────────────────
+  'area-alt':                { wcag: '2.4.4', level: 'A',  severity: 'serious'  },
+  'aria-braille-equivalent': { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'aria-command-name':       { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'aria-conditional-attr':   { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'aria-deprecated-role':    { wcag: '4.1.2', level: 'A',  severity: 'moderate' },
+  'aria-prohibited-attr':    { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'aria-roledescription':    { wcag: '4.1.2', level: 'A',  severity: 'moderate' },
+  'aria-tooltip-name':       { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'duplicate-id':            { wcag: '4.1.1', level: 'A',  severity: 'moderate' },
+  'frame-focusable-content': { wcag: '2.1.1', level: 'A',  severity: 'serious'  },
+  'frame-title-unique':      { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'html-xml-lang-mismatch':  { wcag: '3.1.1', level: 'A',  severity: 'moderate' },
+  'input-button-name':       { wcag: '4.1.2', level: 'A',  severity: 'critical' },
+  'nested-interactive':      { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'p-as-heading':            { wcag: '1.3.1', level: 'A',  severity: 'moderate' },
+  'role-img-alt':            { wcag: '1.1.1', level: 'A',  severity: 'serious'  },
+  'scrollable-region-focusable': { wcag: '2.1.1', level: 'A', severity: 'serious' },
+  'server-side-image-map':   { wcag: '2.1.1', level: 'A',  severity: 'moderate' },
+  'summary-name':            { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
+  'svg-img-alt':             { wcag: '1.1.1', level: 'A',  severity: 'serious'  },
+  'td-has-header':           { wcag: '1.3.1', level: 'A',  severity: 'serious'  },
+  // 3.3.2 Labels or Instructions — axe correctly maps this to 3.3.2
+  // (Lighthouse has the same rule but maps it to 1.3.1)
+  'form-field-multiple-labels': { wcag: '3.3.2', level: 'A', severity: 'moderate' },
+};
 
 // WCAG mapping for common Lighthouse accessibility audits
 const WCAG_MAPPING = {
@@ -66,7 +116,211 @@ const WCAG_MAPPING = {
   'logical-tab-order': { wcag: '2.4.3', level: 'A', severity: 'moderate' },
 };
 
+// IBM Equal Access Checker rules for WCAG criteria not covered by Lighthouse or axe-core.
+// Rule IDs verified against accessibility-checker-engine v4.0.13 checkpoint definitions.
+// Only VIOLATION-level rules are mapped; _review rules may return potentialviolation.
+const IBM_WCAG_MAPPING = {
+  // ── WCAG 2.4.7 Focus Visible (Level AA) ─────────────────────────────────────
+  'element_tabbable_visible': { wcag: '2.4.7', level: 'AA', severity: 'serious',
+    title: 'Focusable element has no visible focus indicator' },
+  'style_focus_visible':      { wcag: '2.4.7', level: 'AA', severity: 'serious',
+    title: 'CSS may have removed the visible focus indicator' },
+  // ── WCAG 1.4.13 Content on Hover or Focus (Level AA) ────────────────────────
+  'style_hover_persistent':   { wcag: '1.4.13', level: 'AA', severity: 'serious',
+    title: 'Content appearing on hover or focus is not persistent or dismissable' },
+  // ── WCAG 3.2.1 On Focus (Level A) ───────────────────────────────────────────
+  'script_focus_blur_review': { wcag: '3.2.1', level: 'A', severity: 'moderate',
+    title: 'Verify focus change does not trigger an unexpected context change' },
+  'script_select_review':     { wcag: '3.2.1', level: 'A', severity: 'moderate',
+    title: 'Verify selection change does not trigger an unexpected context change' },
+  // ── WCAG 3.2.2 On Input (Level A) ───────────────────────────────────────────
+  'form_interaction_review':  { wcag: '3.2.2', level: 'A', severity: 'moderate',
+    title: 'Verify form interaction does not cause an unexpected context change' },
+  'input_onchange_review':    { wcag: '3.2.2', level: 'A', severity: 'moderate',
+    title: 'Verify input change does not cause an unexpected context change' },
+  // ── WCAG 3.3.1 Error Identification (Level A) ───────────────────────────────
+  'error_message_exists':     { wcag: '3.3.1', level: 'A', severity: 'moderate',
+    title: 'Error messages may not be programmatically associated with form fields' },
+  // ── WCAG 1.4.10 Reflow (Level AA) ───────────────────────────────────────────
+  'style_viewport_resizable': { wcag: '1.4.10', level: 'AA', severity: 'serious',
+    title: 'Viewport meta tag may prevent content reflow at 320px width' },
+};
+
+const IBM_RULE_IDS = Object.keys(IBM_WCAG_MAPPING);
+const IBM_TIMEOUT_MS = 90_000;
+
 const SEVERITY_ORDER = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+const AXE_RULE_IDS = Object.keys(AXE_WCAG_MAPPING);
+const AXE_TIMEOUT_MS = 60_000;
+
+// Runs axe-core on the given URL using an existing Puppeteer browser instance.
+// Returns an array of issues in the same format as runLighthouseAudit issues.
+async function runAxeAudit(url, browser) {
+  const page = await browser.newPage();
+  try {
+    await page.setDefaultNavigationTimeout(90_000);
+    // domcontentloaded is sufficient for axe; browser cache makes this fast
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    // Brief pause for JS frameworks to initialize
+    await new Promise(r => setTimeout(r, 800));
+    // Inject axe-core into the page
+    await page.evaluate(axeSource);
+
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error('axe-core timed out after 60s')),
+        AXE_TIMEOUT_MS
+      );
+    });
+
+    let results;
+    try {
+      results = await Promise.race([
+        page.evaluate(async (ruleIds) => {
+          return await window.axe.run(document, {
+            runOnly: { type: 'rule', values: ruleIds },
+            resultTypes: ['violations'],
+          });
+        }, AXE_RULE_IDS),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+
+    const issues = [];
+    for (const violation of (results?.violations || [])) {
+      const wcagInfo = AXE_WCAG_MAPPING[violation.id];
+      if (!wcagInfo) continue;
+      const elements = violation.nodes.slice(0, 8).map(node => ({
+        snippet: node.html || '',
+        selector: (node.target || []).join(', '),
+        label: '',
+        explanation: node.failureSummary || '',
+      }));
+      issues.push({
+        id: `axe-${violation.id}`,
+        title: violation.help,
+        description: violation.description || '',
+        severity: wcagInfo.severity,
+        wcag: wcagInfo.wcag,
+        wcagLevel: wcagInfo.level,
+        score: 0,
+        displayValue: `${violation.nodes.length} element${violation.nodes.length !== 1 ? 's' : ''}`,
+        elements,
+        count: violation.nodes.length,
+      });
+    }
+    return issues;
+  } finally {
+    await Promise.race([
+      page.close().catch(() => {}),
+      new Promise(r => setTimeout(r, 5_000)),
+    ]);
+  }
+}
+
+// Runs IBM Equal Access Checker on the given URL using an existing Puppeteer browser instance.
+// Injects the locally-installed ace.js engine (no CDN download required).
+// Returns issues for WCAG criteria not covered by Lighthouse or axe-core.
+async function runIbmAudit(url, browser) {
+  const page = await browser.newPage();
+  try {
+    await page.setDefaultNavigationTimeout(90_000);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    await new Promise(r => setTimeout(r, 800));
+
+    // Inject IBM ace.js engine; eval sets `var ace` in the eval scope,
+    // then we copy it to globalThis.ace_ibma so the Checker is accessible.
+    await page.evaluate((src) => {
+      return new Promise((resolve, reject) => {
+        try {
+          eval(src); // eslint-disable-line no-eval
+          globalThis.ace_ibma = ace; // ace declared by `var ace;` in ace.js
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }, ibmAceSource);
+
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error('IBM ace timed out after 90s')),
+        IBM_TIMEOUT_MS
+      );
+    });
+
+    let rawResults;
+    try {
+      rawResults = await Promise.race([
+        page.evaluate((ruleIds) => {
+          return new Promise((resolve, reject) => {
+            const checker = new window.ace_ibma.Checker();
+            checker.check(document, ['WCAG_2_1']).then(report => {
+              const ruleSet = new Set(ruleIds);
+              const filtered = (report.results || []).filter(r =>
+                ruleSet.has(r.ruleId) && r.value && r.value[1] !== 'PASS'
+              );
+              resolve(filtered.map(r => ({
+                ruleId: r.ruleId,
+                valueSeverity: r.value ? r.value[0] : 'VIOLATION',
+                valueFail: r.value ? r.value[1] : 'FAIL',
+                snippet: r.snippet || '',
+                path: (r.path && r.path.dom) || '',
+                message: r.message || '',
+              })));
+            }).catch(reject);
+          });
+        }, IBM_RULE_IDS),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+
+    // Group by ruleId, then convert to issue format
+    const byRule = {};
+    for (const r of (rawResults || [])) {
+      if (!byRule[r.ruleId]) byRule[r.ruleId] = [];
+      byRule[r.ruleId].push(r);
+    }
+
+    const issues = [];
+    for (const [ruleId, violations] of Object.entries(byRule)) {
+      const wcagInfo = IBM_WCAG_MAPPING[ruleId];
+      if (!wcagInfo) continue;
+      const isFail = violations.some(v => v.valueFail === 'FAIL');
+      const severity = isFail ? wcagInfo.severity : 'moderate';
+      const elements = violations.slice(0, 8).map(v => ({
+        snippet: v.snippet,
+        selector: v.path,
+        label: '',
+        explanation: v.message,
+      }));
+      issues.push({
+        id: `ibm-${ruleId}`,
+        title: wcagInfo.title,
+        description: '',
+        severity,
+        wcag: wcagInfo.wcag,
+        wcagLevel: wcagInfo.level,
+        score: 0,
+        displayValue: `${violations.length} instance${violations.length !== 1 ? 's' : ''}`,
+        elements,
+        count: violations.length,
+      });
+    }
+    return issues;
+  } finally {
+    await Promise.race([
+      page.close().catch(() => {}),
+      new Promise(r => setTimeout(r, 5_000)),
+    ]);
+  }
+}
 
 function extractElements(audit) {
   if (!audit.details || !audit.details.items) return [];
@@ -244,15 +498,33 @@ export async function runLighthouseAudit(url, browser) {
     });
   }
 
-  issues.sort((a, b) =>
+  // Run axe-core for supplemental WCAG coverage (new criteria + extra checks)
+  let axeIssues = [];
+  try {
+    axeIssues = await runAxeAudit(url, browser);
+  } catch (err) {
+    console.warn(`[axe] Skipped for ${url}: ${err.message}`);
+  }
+
+  // Run IBM Equal Access Checker for criteria not covered by Lighthouse or axe
+  let ibmIssues = [];
+  try {
+    ibmIssues = await runIbmAudit(url, browser);
+  } catch (err) {
+    console.warn(`[ibm] Skipped for ${url}: ${err.message}`);
+  }
+
+  // Merge and sort — axe IDs use 'axe-' prefix, IBM IDs use 'ibm-' prefix
+  const allIssues = [...issues, ...axeIssues, ...ibmIssues];
+  allIssues.sort((a, b) =>
     (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2)
   );
 
   return {
     url,
     score,
-    issues,
-    issueCount: issues.length,
+    issues: allIssues,
+    issueCount: allIssues.length,
     status: 'completed',
     timestamp: new Date().toISOString(),
   };

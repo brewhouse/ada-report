@@ -13,6 +13,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "accessibility-checker": "^4.0.13",
+    "accessibility-checker-engine": "^4.0.13",
+    "axe-core": "^4.11.1",
     "axios": "^1.6.2",
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",

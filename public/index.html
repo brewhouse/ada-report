@@ -246,6 +246,12 @@
             </svg>
             Client Summary
           </button>
+          <button id="vpat-report-btn" class="btn-ghost btn-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+            </svg>
+            VPAT
+          </button>
           <button id="print-report-btn" class="btn-ghost btn-sm">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
@@ -365,6 +371,33 @@
         </button>
       </div>
       <p class="modal-desc">Select a brand — the summary PDF will open in a new tab ready to print. The summary shows scores and issue counts per page without detailed technical breakdowns.</p>
+      <div class="brand-options-grid">
+        <div class="brand-option-card" data-brand="planeteria">
+          <img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria">
+          <span>Planeteria</span>
+        </div>
+        <div class="brand-option-card" data-brand="digitaldeployment">
+          <img src="https://www.digitaldeployment.com/sites/default/themes/dtheme/img/logo.svg" alt="Digital Deployment">
+          <span>Digital Deployment</span>
+        </div>
+        <div class="brand-option-card" data-brand="pensionx">
+          <img src="https://www.pensionx.com/hubfs/RGB_Pensionx_Logo_FullColor.svg" alt="PensionX">
+          <span>PensionX</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== VPAT BRAND MODAL ======================== -->
+  <div id="vpat-brand-modal" class="modal-overlay" style="display:none" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">VPAT Conformance Report</h3>
+        <button class="modal-close-btn" id="vpat-brand-modal-close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="modal-desc">Select a brand — the VPAT Accessibility Conformance Report will open in a new tab ready to print. The VPAT follows the standard VPAT® 2.4 WCAG Edition format mapping issues to WCAG 2.1 criteria.</p>
       <div class="brand-options-grid">
         <div class="brand-option-card" data-brand="planeteria">
           <img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria">

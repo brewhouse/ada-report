@@ -745,6 +745,22 @@ document.querySelectorAll('#summary-brand-modal .brand-option-card').forEach(car
 
 document.getElementById('summary-brand-modal-close').addEventListener('click', () => closeModal('summary-brand-modal'));
 
+// VPAT Report button — opens brand selection modal
+document.getElementById('vpat-report-btn').addEventListener('click', () => {
+  if (!currentAuditId) return;
+  openModal('vpat-brand-modal');
+});
+
+document.querySelectorAll('#vpat-brand-modal .brand-option-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const brand = card.dataset.brand;
+    closeModal('vpat-brand-modal');
+    window.open(`/api/audit/${currentAuditId}/report/vpat?brand=${encodeURIComponent(brand)}&autoprint=true`, '_blank');
+  });
+});
+
+document.getElementById('vpat-brand-modal-close').addEventListener('click', () => closeModal('vpat-brand-modal'));
+
 // Detail PDF button — opens brand selection modal
 document.getElementById('print-report-btn').addEventListener('click', () => {
   if (!currentAuditId) return;
@@ -828,7 +844,7 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 // Close modals on Escape key
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    ['brand-modal', 'email-modal', 'fix-modal'].forEach(id => {
+    ['brand-modal', 'vpat-brand-modal', 'summary-brand-modal', 'email-modal', 'fix-modal'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.style.display !== 'none') closeModal(id);
     });
