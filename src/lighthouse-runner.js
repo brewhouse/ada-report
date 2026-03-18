@@ -146,11 +146,11 @@ const IBM_WCAG_MAPPING = {
 };
 
 const IBM_RULE_IDS = Object.keys(IBM_WCAG_MAPPING);
-const IBM_TIMEOUT_MS = 90_000;
+const IBM_TIMEOUT_MS = 150_000;
 
 const SEVERITY_ORDER = { critical: 0, serious: 1, moderate: 2, minor: 3 };
 const AXE_RULE_IDS = Object.keys(AXE_WCAG_MAPPING);
-const AXE_TIMEOUT_MS = 60_000;
+const AXE_TIMEOUT_MS = 120_000;
 
 // Runs axe-core on the given URL using an existing Puppeteer browser instance.
 // Also extracts interactive element labels for WCAG 3.2.4 cross-page analysis.
@@ -158,9 +158,9 @@ const AXE_TIMEOUT_MS = 60_000;
 async function runAxeAudit(url, browser) {
   const page = await browser.newPage();
   try {
-    await page.setDefaultNavigationTimeout(90_000);
+    await page.setDefaultNavigationTimeout(120_000);
     // domcontentloaded is sufficient for axe; browser cache makes this fast
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     // Brief pause for JS frameworks to initialize
     await new Promise(r => setTimeout(r, 800));
 
@@ -237,8 +237,8 @@ async function runAxeAudit(url, browser) {
 async function runIbmAudit(url, browser) {
   const page = await browser.newPage();
   try {
-    await page.setDefaultNavigationTimeout(90_000);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    await page.setDefaultNavigationTimeout(120_000);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     await new Promise(r => setTimeout(r, 800));
 
     // Inject IBM ace.js engine; eval sets `var ace` in the eval scope,
