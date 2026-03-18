@@ -124,8 +124,6 @@ const IBM_WCAG_MAPPING = {
   // ── WCAG 2.4.7 Focus Visible (Level AA) ─────────────────────────────────────
   'element_tabbable_visible': { wcag: '2.4.7', level: 'AA', severity: 'serious',
     title: 'Focusable element has no visible focus indicator' },
-  'style_focus_visible':      { wcag: '2.4.7', level: 'AA', severity: 'serious',
-    title: 'CSS may have removed the visible focus indicator' },
   // ── WCAG 1.4.13 Content on Hover or Focus (Level AA) ────────────────────────
   'style_hover_persistent':   { wcag: '1.4.13', level: 'AA', severity: 'serious',
     title: 'Content appearing on hover or focus is not persistent or dismissable' },
