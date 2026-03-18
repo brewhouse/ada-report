@@ -2,6 +2,7 @@ import puppeteer from 'puppeteer';
 import lighthouse from 'lighthouse';
 import { readFileSync } from 'fs';
 import { createRequire } from 'module';
+import { extractLabelsFn } from './consistency-checker.js';
 
 const _require = createRequire(import.meta.url);
 // Load axe-core browser bundle once at startup
@@ -154,7 +155,8 @@ const AXE_RULE_IDS = Object.keys(AXE_WCAG_MAPPING);
 const AXE_TIMEOUT_MS = 60_000;
 
 // Runs axe-core on the given URL using an existing Puppeteer browser instance.
-// Returns an array of issues in the same format as runLighthouseAudit issues.
+// Also extracts interactive element labels for WCAG 3.2.4 cross-page analysis.
+// Returns { issues, interactiveLabels }.
 async function runAxeAudit(url, browser) {
   const page = await browser.newPage();
   try {
@@ -163,6 +165,16 @@ async function runAxeAudit(url, browser) {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
     // Brief pause for JS frameworks to initialize
     await new Promise(r => setTimeout(r, 800));
+
+    // Extract interactive labels for 3.2.4 BEFORE axe injection — pure DOM
+    // query, never blocked by CSP.
+    let interactiveLabels = [];
+    try {
+      interactiveLabels = await page.evaluate(extractLabelsFn);
+    } catch (e) {
+      // Non-fatal — consistency check for this page will be skipped
+    }
+
     // Inject axe-core into the page
     await page.evaluate(axeSource);
 
@@ -212,7 +224,7 @@ async function runAxeAudit(url, browser) {
         count: violation.nodes.length,
       });
     }
-    return issues;
+    return { issues, interactiveLabels };
   } finally {
     await Promise.race([
       page.close().catch(() => {}),
@@ -498,10 +510,13 @@ export async function runLighthouseAudit(url, browser) {
     });
   }
 
-  // Run axe-core for supplemental WCAG coverage (new criteria + extra checks)
+  // Run axe-core for supplemental WCAG coverage + collect interactive labels
   let axeIssues = [];
+  let interactiveLabels = [];
   try {
-    axeIssues = await runAxeAudit(url, browser);
+    const axeResult = await runAxeAudit(url, browser);
+    axeIssues = axeResult.issues;
+    interactiveLabels = axeResult.interactiveLabels || [];
   } catch (err) {
     console.warn(`[axe] Skipped for ${url}: ${err.message}`);
   }
@@ -527,5 +542,6 @@ export async function runLighthouseAudit(url, browser) {
     issueCount: allIssues.length,
     status: 'completed',
     timestamp: new Date().toISOString(),
+    interactiveLabels,  // used by cross-page 3.2.4 consistency check
   };
 }

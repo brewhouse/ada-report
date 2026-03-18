@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { crawlWebsite, fetchUrlsFromSitemaps } from './crawler.js';
 import { launchBrowser, runLighthouseAudit } from './lighthouse-runner.js';
+import { analyzeConsistency } from './consistency-checker.js';
 
 const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
 
@@ -273,8 +274,25 @@ async function _runAudit(session, onUpdate) {
 
     await Promise.all(browsers.map((_, idx) => auditWorker(idx)));
 
-    // Phase 4: Compute summary
+    // Phase 4: Cross-page consistency check for WCAG 3.2.4
     const completed = auditedPages.filter(p => p && p.status === 'completed');
+    try {
+      const consistencyResults = analyzeConsistency(completed);
+      for (const { issue, primaryUrl } of consistencyResults) {
+        const targetPage = completed.find(p => p.url === primaryUrl);
+        if (targetPage) {
+          targetPage.issues.push(issue);
+          targetPage.issueCount = targetPage.issues.length;
+        }
+      }
+      if (consistencyResults.length > 0) {
+        console.log(`[consistency] ${consistencyResults.length} WCAG 3.2.4 inconsistency group(s) detected`);
+      }
+    } catch (err) {
+      console.warn('[consistency] Skipped:', err.message);
+    }
+
+    // Phase 5: Compute summary
     const scores = completed.map(p => p.score).filter(s => s !== null);
     const allIssues = completed.flatMap(p => p.issues);
 

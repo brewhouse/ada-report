@@ -177,6 +177,8 @@ const LIGHTHOUSE_TESTED_WCAG = new Set([
   '1.3.4', '1.3.5', '1.4.1', '1.4.2', '1.4.12', '2.2.2', '3.3.2',
   // IBM Equal Access Checker (new criteria not covered by Lighthouse or axe)
   '2.4.7', '1.4.13', '3.2.1', '3.2.2', '3.3.1', '1.4.10',
+  // Cross-page consistency analysis (3.2.4 Consistent Identification)
+  '3.2.4',
 ]);
 
 export function generateVpatReport(session, brandKey = null, autoprint = false) {
