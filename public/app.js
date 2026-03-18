@@ -755,7 +755,7 @@ document.querySelectorAll('#vpat-brand-modal .brand-option-card').forEach(card =
   card.addEventListener('click', () => {
     const brand = card.dataset.brand;
     closeModal('vpat-brand-modal');
-    window.open(`/api/audit/${currentAuditId}/report/vpat?brand=${encodeURIComponent(brand)}&autoprint=true`, '_blank');
+    window.open(`/api/audit/${currentAuditId}/report/vpat?brand=${encodeURIComponent(brand)}`, '_blank');
   });
 });
 

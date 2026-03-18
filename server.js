@@ -395,8 +395,7 @@ app.get('/api/audit/:id/report/vpat', (req, res) => {
   }
 
   const brand = req.query.brand || null;
-  const autoprint = req.query.autoprint === 'true';
-  const reportHtml = generateVpatReport(session, brand, autoprint);
+  const reportHtml = generateVpatReport(session, brand);
 
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
   const date = new Date().toISOString().split('T')[0];
@@ -528,7 +527,7 @@ app.post('/api/audit/:id/email', async (req, res) => {
     const brandKey = brand || null;
     const [summaryPdf, vpatPdf] = await Promise.all([
       generatePdfBuffer(generateSummaryReport(session, brandKey, false)),
-      generatePdfBuffer(generateVpatReport(session, brandKey, false)),
+      generatePdfBuffer(generateVpatReport(session, brandKey)),
     ]);
 
     const transporter = nodemailer.createTransport({

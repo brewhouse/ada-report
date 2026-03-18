@@ -129,7 +129,7 @@ async function sendReport(session, schedule) {
   const brand = schedule.brand || null;
   const [summaryPdf, vpatPdf] = await Promise.all([
     generatePdfBuffer(generateSummaryReport(session, brand, false)),
-    generatePdfBuffer(generateVpatReport(session, brand, false)),
+    generatePdfBuffer(generateVpatReport(session, brand)),
   ]);
 
   const transporter = nodemailer.createTransport({

@@ -183,7 +183,7 @@ const LIGHTHOUSE_TESTED_WCAG = new Set([
   '3.2.3', '2.4.5',
 ]);
 
-export function generateVpatReport(session, brandKey = null, autoprint = false) {
+export function generateVpatReport(session, brandKey = null) {
   const brand = BRANDS[brandKey] || null;
   const accentColor = brand?.accentColor || '#107DC2';
   const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
@@ -281,14 +281,38 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
       + `<br><strong>Elements affected:</strong> ${data.totalElements.toLocaleString()}.`;
   }
 
+  // Convert remarks HTML to plain text suitable for a <textarea>
+  function remarksToPlain(html) {
+    return html
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+      .replace(/&mdash;/g, '\u2014').replace(/&bull;/g, '\u2022').replace(/&nbsp;/g, ' ')
+      .trim();
+  }
+
+  const ALL_CONF_OPTIONS = [
+    'Supports', 'Partially Supports', 'Does Not Support', 'Not Applicable', 'Not Evaluated',
+  ];
+
   function renderCriteriaRows(criteria, level) {
     return criteria.map(c => {
-      const conf = getConformance(c.id);
-      const remarks = getRemarks(c.id);
+      const conf    = getConformance(c.id);
+      const plain   = remarksToPlain(getRemarks(c.id));
+      const options = ALL_CONF_OPTIONS.map(v =>
+        `<option value="${v}"${v === conf.label ? ' selected' : ''}>${v}</option>`
+      ).join('');
       return `<tr>
         <td class="c-criteria"><strong>${c.id}</strong> ${escapeHtml(c.name)}<br><span style="font-size:9px;color:#64748b">Level ${level}</span></td>
-        <td class="c-conf"><span class="conf-pill" style="color:${conf.color};background:${conf.bg};border-color:${conf.border}">${conf.label}</span></td>
-        <td class="c-remarks">${remarks}</td>
+        <td class="c-conf">
+          <select class="conf-select" onchange="updateConf(this)"
+            style="color:${conf.color};background:${conf.bg};border-color:${conf.border}">
+            ${options}
+          </select>
+        </td>
+        <td class="c-remarks">
+          <textarea class="remarks-textarea" rows="2">${escapeHtml(plain)}</textarea>
+        </td>
       </tr>`;
     }).join('');
   }
@@ -329,10 +353,19 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
     .c-remarks { padding: 6px 10px; width: 44%; vertical-align: top; font-size: 10px; color: #475569; }
     .disclaimer { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px 12px; font-size: 10px; color: #64748b; margin-top: 14px; }
     .footer { text-align: center; font-size: 9px; color: #94a3b8; margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
-    .print-btn { position: fixed; top: 16px; right: 16px; background: ${accentColor}; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
-    .print-btn:hover { opacity: 0.9; }
+    /* Editable VPAT controls */
+    .conf-select { width: 100%; padding: 3px 6px; border-radius: 4px; border: 1.5px solid; font-size: 10px; font-weight: 700; cursor: pointer; appearance: none; -webkit-appearance: none; text-align: center; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; padding-right: 20px; }
+    .remarks-textarea { width: 100%; min-height: 48px; resize: vertical; border: 1.5px dashed #cbd5e1; border-radius: 4px; padding: 4px 6px; font-family: inherit; font-size: 10px; color: #475569; line-height: 1.5; background: #fafafa; overflow: hidden; }
+    .remarks-textarea:focus { outline: none; border-color: ${accentColor}; background: #fff; }
+    .toolbar { position: fixed; top: 14px; right: 16px; display: flex; gap: 8px; z-index: 1000; }
+    .btn-tool { border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
+    .btn-print { background: ${accentColor}; color: white; }
+    .btn-save  { background: #f1f5f9; color: #1e293b; border: 1.5px solid #cbd5e1; }
+    .btn-tool:hover { opacity: 0.88; }
     @media print {
-      .print-btn { display: none; }
+      .toolbar { display: none; }
+      .conf-select { -webkit-appearance: none; appearance: none; border: 1px solid currentColor !important; background-image: none !important; padding-right: 6px; }
+      .remarks-textarea { border: none; resize: none; background: transparent; padding: 0; }
       .criteria-tbl { page-break-inside: auto; }
       h2 { page-break-after: avoid; }
       tr { page-break-inside: avoid; }
@@ -340,7 +373,10 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
   </style>
 </head>
 <body>
-  <button class="print-btn" onclick="window.print()">Print / Save PDF</button>
+  <div class="toolbar">
+    <button class="btn-tool btn-save" onclick="saveHtml()">Save HTML</button>
+    <button class="btn-tool btn-print" onclick="window.print()">Print / Save PDF</button>
+  </div>
   <div class="page">
 
     <!-- Header -->
@@ -420,7 +456,63 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
       Generated by ${escapeHtml(brandName)} &bull; Powered by Google Lighthouse, Axe Tools &amp; IBM Equal Access Checker &bull; ${escapeHtml(auditDate)}
     </div>
   </div>
-  ${autoprint ? `<script>window.addEventListener('load', function(){ setTimeout(window.print, 900); });</script>` : ''}
+  <script>
+    var CONF_STYLES = {
+      'Supports':           { color: '#16a34a', bg: '#f0fdf4', border: '#86efac' },
+      'Partially Supports': { color: '#b45309', bg: '#fffbeb', border: '#fcd34d' },
+      'Does Not Support':   { color: '#dc2626', bg: '#fef2f2', border: '#fca5a5' },
+      'Not Applicable':     { color: '#475569', bg: '#f1f5f9', border: '#94a3b8' },
+      'Not Evaluated':      { color: '#92400e', bg: '#fffbeb', border: '#d97706' },
+    };
+    function updateConf(sel) {
+      var s = CONF_STYLES[sel.value] || {};
+      sel.style.color       = s.color  || '';
+      sel.style.background  = s.bg     || '';
+      sel.style.borderColor = s.border || '';
+    }
+    function autoResize(ta) {
+      ta.style.height = 'auto';
+      ta.style.height = ta.scrollHeight + 'px';
+    }
+    function saveHtml() {
+      var clone = document.documentElement.cloneNode(true);
+      // Bake current select values into the clone
+      var origSels  = document.querySelectorAll('.conf-select');
+      var cloneSels = clone.querySelectorAll('.conf-select');
+      origSels.forEach(function(sel, i) {
+        var cs = cloneSels[i];
+        Array.from(cs.options).forEach(function(o) { o.removeAttribute('selected'); });
+        var chosen = cs.querySelector('option[value="' + sel.value + '"]');
+        if (chosen) chosen.setAttribute('selected', '');
+        cs.style.color       = sel.style.color;
+        cs.style.background  = sel.style.background;
+        cs.style.borderColor = sel.style.borderColor;
+      });
+      // Bake current textarea values into the clone
+      var origTAs  = document.querySelectorAll('.remarks-textarea');
+      var cloneTAs = clone.querySelectorAll('.remarks-textarea');
+      origTAs.forEach(function(ta, i) { cloneTAs[i].textContent = ta.value; });
+      // Remove toolbar from saved copy
+      clone.querySelectorAll('.toolbar').forEach(function(el) { el.remove(); });
+      // Remove this script block so the saved file doesn't have interactive JS
+      var html = '<!DOCTYPE html>\n' + clone.outerHTML;
+      var blob = new Blob([html], { type: 'text/html' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = document.title.replace(/[^a-z0-9-]/gi, '-').toLowerCase() + '.html';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+    window.addEventListener('load', function() {
+      // Apply initial colours to all selects
+      document.querySelectorAll('.conf-select').forEach(function(sel) { updateConf(sel); });
+      // Auto-resize all textareas and attach input listeners
+      document.querySelectorAll('.remarks-textarea').forEach(function(ta) {
+        ta.style.height = ta.scrollHeight + 'px';
+        ta.addEventListener('input', function() { autoResize(this); });
+      });
+    });
+  </script>
 </body>
 </html>`;
 }
