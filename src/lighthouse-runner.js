@@ -396,7 +396,7 @@ export async function launchBrowser() {
 
 // Hard cap per page so a hung Chrome (e.g. OOM-killed while another audit starts)
 // can't freeze the entire audit indefinitely.  5 minutes >> maxWaitForLoad (2 min).
-const LIGHTHOUSE_PAGE_TIMEOUT_MS = 5 * 60 * 1000;
+const LIGHTHOUSE_PAGE_TIMEOUT_MS = 7 * 60 * 1000;
 
 export async function runLighthouseAudit(url, browser) {
   const port = parseInt(new URL(browser.wsEndpoint()).port);
@@ -406,7 +406,7 @@ export async function runLighthouseAudit(url, browser) {
     let timeoutHandle;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(
-        () => reject(new Error(`Lighthouse timed out after 5 minutes`)),
+        () => reject(new Error(`Lighthouse timed out after 7 minutes`)),
         LIGHTHOUSE_PAGE_TIMEOUT_MS
       );
     });

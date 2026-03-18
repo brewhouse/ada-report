@@ -5,6 +5,23 @@ import { analyzeConsistency } from './consistency-checker.js';
 
 const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
 
+// Errors caused by the page itself — retrying won't help.
+function isNonRetryableError(error) {
+  const msg = error.message || '';
+  return (
+    /\bstatus.?code\s+[45]\d\d\b/i.test(msg) ||   // HTTP 4xx / 5xx
+    /too many redirects|ERR_TOO_MANY_REDIRECTS/i.test(msg) ||
+    /ERR_NAME_NOT_RESOLVED/i.test(msg)              // DNS failure
+  );
+}
+
+// Lighthouse internal errors caused by a stale Chrome instance — must replace
+// the browser before retrying, otherwise the retry will fail identically.
+function requiresBrowserReplace(error) {
+  const msg = error.message || '';
+  return /performance mark has not been set|lh:runner|lh:driver/i.test(msg);
+}
+
 // Normalize a pathname for comparison: strip trailing slash, lowercase.
 function normPath(pathname) {
   return (pathname || '/').replace(/\/$/, '').toLowerCase() || '/';
@@ -59,14 +76,17 @@ export async function rescanPage(url) {
   try {
     let pageResult;
     let lastError;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         pageResult = await runLighthouseAudit(url, browser);
         lastError = null;
         break;
       } catch (error) {
         lastError = error;
-        if (attempt < 2) await new Promise(r => setTimeout(r, 4000));
+        if (attempt < 3) {
+          if (isNonRetryableError(error)) break;
+          await new Promise(r => setTimeout(r, attempt * 5000));
+        }
       }
     }
     if (lastError) {
@@ -223,22 +243,28 @@ async function _runAudit(session, onUpdate) {
         const pageUrl = pages[i];
         onUpdate({ currentPage: pageUrl });
 
+        const MAX_ATTEMPTS = 3;
         let pageResult;
         let lastError;
-        for (let attempt = 1; attempt <= 2; attempt++) {
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
           try {
             pageResult = await runLighthouseAudit(pageUrl, browsers[workerIdx]);
             lastError = null;
             break;
           } catch (error) {
             lastError = error;
-            console.warn(`[audit] Page error (attempt ${attempt}/2) — ${pageUrl}: ${error.message}`);
-            if (attempt < 2) {
-              // Short pause before retry. Do NOT replace the browser here —
-              // replacing before the retry causes a 10-60 s stall on every
-              // transient error, making other running audits appear frozen.
-              // If Chrome is truly dead it will fail fast on retry anyway.
-              await new Promise(r => setTimeout(r, 3000));
+            console.warn(`[audit] Page error (attempt ${attempt}/${MAX_ATTEMPTS}) — ${pageUrl}: ${error.message}`);
+            if (attempt < MAX_ATTEMPTS) {
+              // Don't retry errors caused by the page itself (HTTP errors, bad redirects, DNS).
+              if (isNonRetryableError(error)) break;
+              // Lighthouse internal mark errors mean Chrome is in a bad state —
+              // replace the browser before retrying so the next attempt gets a
+              // clean instance. Cap at 20 s so a failed restart doesn't stall.
+              if (requiresBrowserReplace(error)) {
+                await Promise.race([replaceBrowser(workerIdx), new Promise(r => setTimeout(r, 20_000))]);
+              }
+              // Progressive back-off: 5 s after attempt 1, 10 s after attempt 2.
+              await new Promise(r => setTimeout(r, attempt * 5000));
             }
           }
         }
