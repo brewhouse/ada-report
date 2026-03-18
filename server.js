@@ -397,13 +397,7 @@ app.get('/api/audit/:id/report/vpat', (req, res) => {
   const brand = req.query.brand || null;
   const reportHtml = generateVpatReport(session, brand);
 
-  const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-  const date = new Date().toISOString().split('T')[0];
-
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  if (!autoprint) {
-    res.setHeader('Content-Disposition', `attachment; filename="vpat-report-${domain}-${date}.html"`);
-  }
   res.send(reportHtml);
 });
 
