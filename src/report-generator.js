@@ -180,7 +180,7 @@ const LIGHTHOUSE_TESTED_WCAG = new Set([
   // Cross-page consistency analysis (3.2.4 Consistent Identification)
   '3.2.4',
   // Manually verified criteria — confirmed Supports via template/CMS inspection
-  '3.2.3', '2.4.6',
+  '3.2.3', '2.4.5',
 ]);
 
 export function generateVpatReport(session, brandKey = null, autoprint = false) {
@@ -257,7 +257,7 @@ export function generateVpatReport(session, brandKey = null, autoprint = false) 
   // Fixed remarks for criteria confirmed via manual / CMS-level verification.
   const MANUAL_REMARKS = {
     '3.2.3': 'Navigation verified on Home Page. Site uses a single CMS. All internal pages share the same header/footer component. Navigation order is consistent by implementation.',
-    '2.4.6': 'The site provides two independent navigation mechanisms meeting this criterion: (1) a persistent global navigation menu in the site header, and (2) a site-wide search function returning relevant results, both present on all pages via a shared CMS template. The navigation menu was keyboard-tested and confirmed operable; search was tested with representative queries and returns relevant content; the search form has a proper programmatic label. Representative pages from across different sections were verified. Pages within sequential process flows (form journeys, payment steps) are exempt per WCAG 2.4.5 and were excluded from this assessment.',
+    '2.4.5': 'The site provides two independent navigation mechanisms meeting this criterion: (1) a persistent global navigation menu in the site header, and (2) a site-wide search function returning relevant results, both present on all pages via a shared CMS template. The navigation menu was keyboard-tested and confirmed operable; search was tested with representative queries and returns relevant content; the search form has a proper programmatic label. Representative pages from across different sections were verified. Pages within sequential process flows (form journeys, payment steps) are exempt per WCAG 2.4.5 and were excluded from this assessment.',
   };
 
   function getRemarks(wcagId) {
