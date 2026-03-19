@@ -77,6 +77,17 @@ setInterval(() => {
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', sessions: auditSessions.size }));
 
+// DB connectivity check — hit /api/db-status to confirm MySQL is reachable
+app.get('/api/db-status', async (_req, res) => {
+  try {
+    const { initDb } = await import('./src/db.js');
+    await initDb();
+    res.json({ status: 'connected', message: 'MySQL is reachable and tables are initialised' });
+  } catch (err) {
+    res.status(503).json({ status: 'error', message: err.message });
+  }
+});
+
 // ── WebSocket ──────────────────────────────────────────────────────────────────
 wss.on('connection', (ws, req) => {
   const url     = new URL(req.url, 'http://localhost');
@@ -107,8 +118,6 @@ function broadcastToAudit(auditId, message) {
   conns.forEach(ws => { if (ws.readyState === ws.OPEN) ws.send(msg); });
 }
 
-// sanitizeSession strips page issues from the WebSocket payload.
-// Issue data lives in MySQL; the live progress view only needs score + issueCount.
 function sanitizeSession(session) {
   return {
     ...session,
@@ -117,6 +126,7 @@ function sanitizeSession(session) {
       status:     p.status,
       score:      p.score,
       issueCount: p.issueCount,
+      issues:     p.issues || [],   // included so the right panel can display them
       error:      p.error,
       timestamp:  p.timestamp,
     })),
@@ -208,18 +218,25 @@ async function processAuditQueue() {
           if (update.completedPage) {
             const page = update.completedPage;
             session.pages.push(page);
-            // Persist to DB and free issues from memory immediately.
-            // This is the key fix for concurrent large-site memory crashes.
+            const { completedPage, ...rest } = update;
+            Object.assign(session, rest);
+
+            // Broadcast immediately so the right panel receives full issue data
+            // BEFORE the async DB save nulls page.issues for memory savings.
+            flushBroadcast();
+
+            // Save to DB then free the heavy issues array from RAM.
             savePageAndFreeMemory(session, page);
-          }
-          const { completedPage, ...rest } = update;
-          Object.assign(session, rest);
-          // Debounce WS broadcasts to at most every 2 s during page auditing.
-          if (!broadcastTimer) {
-            broadcastTimer = setTimeout(() => {
-              broadcastTimer = null;
-              broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-            }, 2000);
+          } else {
+            const { completedPage, ...rest } = update;
+            Object.assign(session, rest);
+            // Debounce when there's no page data (progress-only update).
+            if (!broadcastTimer) {
+              broadcastTimer = setTimeout(() => {
+                broadcastTimer = null;
+                broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+              }, 2000);
+            }
           }
         } else {
           Object.assign(session, update);
