@@ -782,8 +782,17 @@ app.get('*', (_req, res) => {
 // ── Startup ────────────────────────────────────────────────────────────────────
 
 await mkdir(DATA_DIR, { recursive: true }).catch(() => {});
-await initDb();
-await loadSessionsFromDb();
+
+// DB connection is non-fatal — if the MySQL server is unreachable (e.g. firewall)
+// the app starts in degraded mode with in-memory-only storage and logs a warning.
+try {
+  await initDb();
+  await loadSessionsFromDb();
+} catch (err) {
+  console.error('[db] ⚠️  Could not connect to MySQL:', err.message);
+  console.error('[db] ⚠️  Running without DB persistence. Check MYSQL_HOST and Cloudways firewall (whitelist this server\'s IP).');
+}
+
 await initScheduler(DATA_DIR);
 
 // Prune sessions older than 30 days every 24 hours.

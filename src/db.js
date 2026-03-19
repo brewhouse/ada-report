@@ -24,7 +24,7 @@ const pool = mysql.createPool({
   queueLimit:       0,
   timezone:         'Z',       // store/retrieve datetimes as UTC
   charset:          'utf8mb4',
-  connectTimeout:   30000,
+  connectTimeout:   10000,
 });
 
 // ── Table initialisation ──────────────────────────────────────────────────────
