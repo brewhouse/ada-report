@@ -1,17 +1,23 @@
 import { v4 as uuidv4 } from 'uuid';
 import cron from 'node-cron';
-import { readFile, writeFile, rename as renameFile, mkdir } from 'fs/promises';
+import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit } from './audit-manager.js';
 import { generateReport, generateSummaryReport, generateVpatReport } from './report-generator.js';
+import {
+  upsertScheduleToDb, deleteScheduleFromDb,
+  loadSchedulesFromDb, patchScheduleInDb,
+  savePage,
+} from './db.js';
 
-const TIMEZONE = 'America/Los_Angeles';
-const AUDIT_TIMEOUT_MS = 480 * 60 * 1000; // 480 minutes
+const TIMEZONE        = 'America/Los_Angeles';
+const AUDIT_TIMEOUT_MS = 480 * 60 * 1000;
 
-let schedulesFile = null;
 let reportsDir = null;
+
+// In-memory cache — loaded from DB on startup, kept in sync for cron scheduling.
 const schedules = new Map();  // id → schedule object
 const cronJobs  = new Map();  // id → node-cron task
 
@@ -26,8 +32,8 @@ function ordinal(n) {
 }
 
 function formatTime(hour, minute) {
-  const h = hour ?? 8;
-  const m = minute ?? 0;
+  const h  = hour   ?? 8;
+  const m  = minute ?? 0;
   const hh = h % 12 || 12;
   const mm = String(m).padStart(2, '0');
   return `${hh}:${mm} ${h < 12 ? 'AM' : 'PM'} PST`;
@@ -45,7 +51,7 @@ export function describeSchedule(s) {
 
 function buildCronExpr({ frequency, dayOfWeek, dayOfMonth, hour, minute }) {
   const m = minute ?? 0;
-  const h = hour ?? 8;
+  const h = hour   ?? 8;
   switch (frequency) {
     case 'daily':   return `${m} ${h} * * *`;
     case 'weekly':  return `${m} ${h} * * ${dayOfWeek ?? 1}`;
@@ -83,22 +89,22 @@ async function sendDevReport(session, schedule, reportUrl) {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return;
 
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
+    host:   process.env.SMTP_HOST,
+    port:   parseInt(process.env.SMTP_PORT || '587'),
     secure: process.env.SMTP_SECURE === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
 
   const avg = session.summary?.averageScore ?? 0;
 
   await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to:   schedule.devEmails.join(', '),
+    from:    process.env.SMTP_FROM || process.env.SMTP_USER,
+    to:      schedule.devEmails.join(', '),
     subject: `ADA Detailed Report (Developer) – ${session.url}`,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
         <h2 style="color:#107DC2;">ADA Detailed Accessibility Report</h2>
-        <p>A scheduled audit completed for <strong>${session.url}</strong>. The full detailed report (with per-page issue breakdowns) is available for download below.</p>
+        <p>A scheduled audit completed for <strong>${session.url}</strong>.</p>
         <table style="margin:20px 0;border-collapse:collapse;width:100%;">
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Pages Audited</td><td style="padding:8px 12px;border:1px solid #e2e8f0;">${session.summary?.totalPages ?? 0}</td></tr>
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Average Score</td><td style="padding:8px 12px;border:1px solid #e2e8f0;">${avg}/100</td></tr>
@@ -112,7 +118,7 @@ async function sendDevReport(session, schedule, reportUrl) {
           </a>
         </p>
         <p style="font-size:12px;color:#94a3b8;margin-top:8px;">This link is valid for 30 days.</p>
-        <p style="font-size:12px;color:#94a3b8;margin-top:32px;">Scheduled report by Planeteria Inquiros ADA Checker &bull; Powered by Google Lighthouse</p>
+        <p style="font-size:12px;color:#94a3b8;margin-top:32px;">Scheduled report by Planeteria Inquiros ADA Checker</p>
       </div>
     `,
   });
@@ -133,10 +139,10 @@ async function sendReport(session, schedule) {
   ]);
 
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
+    host:   process.env.SMTP_HOST,
+    port:   parseInt(process.env.SMTP_PORT || '587'),
     secure: process.env.SMTP_SECURE === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
 
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
@@ -144,8 +150,8 @@ async function sendReport(session, schedule) {
   const avg    = session.summary?.averageScore ?? 0;
 
   await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to:   schedule.emails.join(', '),
+    from:    process.env.SMTP_FROM || process.env.SMTP_USER,
+    to:      schedule.emails.join(', '),
     subject: `ADA Accessibility Report – ${session.url}`,
     html: `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -171,16 +177,8 @@ async function sendReport(session, schedule) {
       </div>
     `,
     attachments: [
-      {
-        filename: `accessibility-summary-${domain}-${date}.pdf`,
-        content:  summaryPdf,
-        contentType: 'application/pdf',
-      },
-      {
-        filename: `vpat-report-${domain}-${date}.pdf`,
-        content:  vpatPdf,
-        contentType: 'application/pdf',
-      },
+      { filename: `accessibility-summary-${domain}-${date}.pdf`, content: summaryPdf, contentType: 'application/pdf' },
+      { filename: `vpat-report-${domain}-${date}.pdf`,           content: vpatPdf,    contentType: 'application/pdf' },
     ],
   });
 
@@ -197,20 +195,20 @@ async function runScheduledAudit(scheduleId) {
   const startedAt = new Date().toISOString();
 
   const session = {
-    id: uuidv4(),
-    url: schedule.url,
-    urlList: null,
+    id:              uuidv4(),
+    url:             schedule.url,
+    urlList:         null,
     excludeSitemaps: schedule.excludeSitemaps?.length > 0 ? schedule.excludeSitemaps : null,
-    maxPages: Math.min(schedule.maxPages || 50, 5000),
-    status: 'queued',
-    startTime: startedAt,
-    endTime: null,
-    pages: [],
-    crawledUrls: [],
-    currentPage: null,
-    progress: { crawled: 0, total: 0, audited: 0 },
-    summary: null,
-    error: null,
+    maxPages:        Math.min(schedule.maxPages || 50, 5000),
+    status:          'queued',
+    startTime:       startedAt,
+    endTime:         null,
+    pages:           [],
+    crawledUrls:     [],
+    currentPage:     null,
+    progress:        { crawled: 0, total: 0, audited: 0 },
+    summary:         null,
+    error:           null,
   };
 
   const timeout = new Promise((_, reject) =>
@@ -221,7 +219,14 @@ async function runScheduledAudit(scheduleId) {
     await Promise.race([
       startAudit(session, update => {
         if ('completedPage' in update) {
-          if (update.completedPage) session.pages.push(update.completedPage);
+          if (update.completedPage) {
+            const page = update.completedPage;
+            session.pages.push(page);
+            // Persist page to DB and free issues from memory.
+            savePage(session.id, page)
+              .then(() => { page.issues = null; })
+              .catch(err => console.warn('[scheduler][db] savePage error:', err.message));
+          }
           const { completedPage, ...rest } = update;
           Object.assign(session, rest);
         } else {
@@ -232,14 +237,17 @@ async function runScheduledAudit(scheduleId) {
     ]);
 
     if (session.status === 'completed') {
-      // Save detailed HTML report to disk and email link to developers
+      // Save detailed HTML report to disk for developer email link.
       let reportUrl = null;
       if (reportsDir) {
         try {
-          const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-          const date = new Date().toISOString().split('T')[0];
+          // Re-attach issues from DB for report generation.
+          const { getFullSession } = await import('./db.js');
+          const fullSession = await getFullSession(session.id);
+          const domain       = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+          const date         = new Date().toISOString().split('T')[0];
           const reportFilename = `${domain}-${date}-${session.id}.html`;
-          const reportHtml = generateReport(session, schedule.brand || null, false);
+          const reportHtml   = generateReport(fullSession || session, schedule.brand || null, false);
           await writeFile(join(reportsDir, reportFilename), reportHtml, 'utf8');
           const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
           reportUrl = `${baseUrl}/api/reports/${reportFilename}`;
@@ -250,12 +258,12 @@ async function runScheduledAudit(scheduleId) {
       }
 
       await sendReport(session, schedule);
-      if (reportUrl) await sendDevReport(session, schedule, reportUrl).catch(err =>
-        console.warn('[scheduler] Dev report email failed:', err.message)
-      );
-      await patchSchedule(scheduleId, {
-        lastRun: startedAt, lastRunStatus: 'success', lastRunError: null,
-      });
+      if (reportUrl) {
+        await sendDevReport(session, schedule, reportUrl).catch(err =>
+          console.warn('[scheduler] Dev report email failed:', err.message)
+        );
+      }
+      await patchSchedule(scheduleId, { lastRun: startedAt, lastRunStatus: 'success', lastRunError: null });
       console.log(`[scheduler] Completed — ${schedule.url}`);
     } else {
       await patchSchedule(scheduleId, {
@@ -265,9 +273,7 @@ async function runScheduledAudit(scheduleId) {
     }
   } catch (err) {
     console.error(`[scheduler] Audit failed — ${schedule.url}:`, err.message);
-    await patchSchedule(scheduleId, {
-      lastRun: startedAt, lastRunStatus: 'error', lastRunError: err.message,
-    });
+    await patchSchedule(scheduleId, { lastRun: startedAt, lastRunStatus: 'error', lastRunError: err.message });
   }
 }
 
@@ -275,7 +281,9 @@ async function patchSchedule(id, fields) {
   const s = schedules.get(id);
   if (!s) return;
   Object.assign(s, fields);
-  await saveSchedules();
+  await patchScheduleInDb(id, fields).catch(err =>
+    console.warn('[scheduler][db] patchScheduleInDb error:', err.message)
+  );
 }
 
 // ── Cron registration ──────────────────────────────────────────────────────────
@@ -301,34 +309,21 @@ function registerCronJob(schedule) {
   console.log(`[scheduler] Cron "${expr}" (TZ: ${TIMEZONE}) for ${schedule.url}`);
 }
 
-// ── Persistence ────────────────────────────────────────────────────────────────
-
-async function saveSchedules() {
-  if (!schedulesFile) return;
-  // Write to a temp file first, then atomically rename — prevents data loss on OOM kill.
-  const tmp = schedulesFile + '.tmp';
-  await writeFile(tmp, JSON.stringify([...schedules.values()], null, 2), 'utf8');
-  await renameFile(tmp, schedulesFile);
-}
-
-async function loadSchedules() {
-  try {
-    const data = JSON.parse(await readFile(schedulesFile, 'utf8'));
-    if (Array.isArray(data)) {
-      data.forEach(s => s?.id && schedules.set(s.id, s));
-      console.log(`[scheduler] Loaded ${schedules.size} schedule(s) from disk`);
-    }
-  } catch { /* file doesn't exist yet — that's fine */ }
-}
-
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export async function initScheduler(dataDir) {
-  schedulesFile = join(dataDir, 'schedules.json');
   reportsDir = join(dataDir, 'reports');
   await mkdir(reportsDir, { recursive: true }).catch(() => {});
-  console.log(`[scheduler] Schedules file: ${schedulesFile}`);
-  await loadSchedules();
+
+  // Load schedules from DB (replaces reading from schedules.json).
+  try {
+    const rows = await loadSchedulesFromDb();
+    rows.forEach(s => schedules.set(s.id, s));
+    console.log(`[scheduler] Loaded ${schedules.size} schedule(s) from database`);
+  } catch (err) {
+    console.warn('[scheduler] Failed to load schedules from DB:', err.message);
+  }
+
   for (const s of schedules.values()) registerCronJob(s);
 }
 
@@ -343,27 +338,28 @@ export function getSchedules() {
 export async function addSchedule(data) {
   const s = {
     id:              uuidv4(),
-    name:            data.name || '',
+    name:            data.name            || '',
     url:             data.url,
-    maxPages:        data.maxPages || 50,
+    maxPages:        data.maxPages        || 50,
     excludeSitemaps: data.excludeSitemaps || [],
-    frequency:       data.frequency || 'weekly',
-    dayOfWeek:       data.dayOfWeek  ?? 1,
-    dayOfMonth:      data.dayOfMonth ?? 1,
-    hour:            data.hour   ?? 8,
-    minute:          data.minute ?? 0,
-    emails:          data.emails    || [],
-    devEmails:       data.devEmails || [],
-    brand:           data.brand  || 'planeteria',
-    enabled:         data.enabled !== false,
+    frequency:       data.frequency       || 'weekly',
+    dayOfWeek:       data.dayOfWeek       ?? 1,
+    dayOfMonth:      data.dayOfMonth      ?? 1,
+    hour:            data.hour            ?? 8,
+    minute:          data.minute          ?? 0,
+    emails:          data.emails          || [],
+    devEmails:       data.devEmails       || [],
+    brand:           data.brand           || 'planeteria',
+    enabled:         data.enabled         !== false,
     lastRun:         null,
     lastRunStatus:   null,
     lastRunError:    null,
     createdAt:       new Date().toISOString(),
   };
+
   schedules.set(s.id, s);
+  await upsertScheduleToDb(s);
   registerCronJob(s);
-  await saveSchedules();
   return enrichSchedule(s);
 }
 
@@ -372,8 +368,8 @@ export async function updateSchedule(id, data) {
   if (!existing) return null;
   const updated = { ...existing, ...data, id };
   schedules.set(id, updated);
+  await upsertScheduleToDb(updated);
   registerCronJob(updated);
-  await saveSchedules();
   return enrichSchedule(updated);
 }
 
@@ -381,11 +377,10 @@ export async function deleteSchedule(id) {
   const job = cronJobs.get(id);
   if (job) { job.stop(); cronJobs.delete(id); }
   schedules.delete(id);
-  await saveSchedules();
+  await deleteScheduleFromDb(id);
 }
 
 export async function triggerNow(id) {
-  // Fire and forget — does not block the HTTP response
   runScheduledAudit(id).catch(err =>
     console.error('[scheduler] triggerNow error:', err.message)
   );
@@ -400,14 +395,19 @@ export async function importSchedules(items) {
     if (schedules.has(item.id)) {
       const merged = { ...schedules.get(item.id), ...item, id: item.id };
       schedules.set(item.id, merged);
+      await upsertScheduleToDb(merged).catch(err =>
+        console.warn('[scheduler][db] upsertScheduleToDb (import) error:', err.message)
+      );
       registerCronJob(merged);
       updated++;
     } else {
       schedules.set(item.id, item);
+      await upsertScheduleToDb(item).catch(err =>
+        console.warn('[scheduler][db] upsertScheduleToDb (import) error:', err.message)
+      );
       registerCronJob(item);
       imported++;
     }
   }
-  await saveSchedules();
   return { imported, updated, skipped, total: items.length };
 }

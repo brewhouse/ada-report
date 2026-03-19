@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdir, readdir, readFile, writeFile, unlink, stat } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
@@ -15,30 +15,34 @@ import {
   initScheduler, getSchedules, addSchedule,
   updateSchedule, deleteSchedule, triggerNow, importSchedules,
 } from './src/scheduler.js';
+import {
+  initDb, upsertSession, savePage, deletePageByUrl,
+  loadSessionMetas, getFullSession, recomputeSummary, deleteOldSessions,
+} from './src/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // node-cron registers SIGINT/SIGTERM/exit/SIGHUP listeners per scheduled task.
-// Raise the limit so multiple schedules don't trigger a false memory-leak warning.
 process.setMaxListeners(100);
 
-// Session persistence directory — set DATA_DIR env var to a Render Disk mount path
-// for persistence across deployments (e.g. DATA_DIR=/data/sessions)
+// Reports directory — detailed HTML reports saved for scheduler dev-email links
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'data', 'sessions');
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-// In-memory store for audit sessions (max 50)
+// ── In-memory session store ────────────────────────────────────────────────────
+// Keeps ACTIVE (queued/crawling/auditing) sessions and lightweight metadata for
+// recently-completed sessions. Full page+issue data is in MySQL — not here.
 const auditSessions = new Map();
-const MAX_SESSIONS = 50;
+const MAX_SESSIONS = 100;
 
 // WebSocket connections per audit
 const wsConnections = new Map();
 
-// Audit queue for rate limiting
+// Audit queue
 const auditQueue = [];
 let runningAudits = 0;
 const MAX_CONCURRENT_AUDITS = 4;
@@ -47,13 +51,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(join(__dirname, 'public')));
 
-// ── Scheduler auth ──────────────────────────────────────────────────────────────
-// Token store: token → expiry timestamp
+// ── Scheduler auth ─────────────────────────────────────────────────────────────
 const schedulerTokens = new Map();
-const TOKEN_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 
 function schedulerAuth(req, res, next) {
-  const auth = req.headers['authorization'] || '';
+  const auth  = req.headers['authorization'] || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   const expiry = schedulerTokens.get(token);
@@ -64,7 +67,6 @@ function schedulerAuth(req, res, next) {
   next();
 }
 
-// Periodically prune expired tokens
 setInterval(() => {
   const now = Date.now();
   for (const [tok, exp] of schedulerTokens) {
@@ -75,9 +77,9 @@ setInterval(() => {
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', sessions: auditSessions.size }));
 
-// WebSocket handling
+// ── WebSocket ──────────────────────────────────────────────────────────────────
 wss.on('connection', (ws, req) => {
-  const url = new URL(req.url, 'http://localhost');
+  const url     = new URL(req.url, 'http://localhost');
   const auditId = url.searchParams.get('auditId');
 
   if (!auditId) return ws.close();
@@ -95,7 +97,6 @@ wss.on('connection', (ws, req) => {
       if (conns.size === 0) wsConnections.delete(auditId);
     }
   });
-
   ws.on('error', () => {});
 });
 
@@ -103,65 +104,62 @@ function broadcastToAudit(auditId, message) {
   const conns = wsConnections.get(auditId);
   if (!conns) return;
   const msg = JSON.stringify(message);
-  conns.forEach(ws => {
-    if (ws.readyState === ws.OPEN) ws.send(msg);
-  });
+  conns.forEach(ws => { if (ws.readyState === ws.OPEN) ws.send(msg); });
 }
 
+// sanitizeSession strips page issues from the WebSocket payload.
+// Issue data lives in MySQL; the live progress view only needs score + issueCount.
 function sanitizeSession(session) {
   return {
     ...session,
     pages: session.pages.map(p => ({
-      url: p.url,
-      status: p.status,
-      score: p.score,
+      url:        p.url,
+      status:     p.status,
+      score:      p.score,
       issueCount: p.issueCount,
-      issues: p.issues,
-      error: p.error,
-      timestamp: p.timestamp,
+      error:      p.error,
+      timestamp:  p.timestamp,
     })),
   };
 }
 
-// ── Disk persistence ───────────────────────────────────────────────────────────
+// ── DB persistence helpers ─────────────────────────────────────────────────────
 
-async function saveSessionToDisk(session) {
+// Persist a completed/error session's metadata to the DB.
+async function saveSessionToDb(session) {
   if (session.status !== 'completed' && session.status !== 'error') return;
   try {
-    await writeFile(
-      join(DATA_DIR, `${session.id}.json`),
-      JSON.stringify(sanitizeSession(session)),
-      'utf8'
-    );
+    await upsertSession(session);
   } catch (err) {
-    if (process.env.DEBUG) console.warn('[sessions] write error:', err.message);
+    console.warn('[db] saveSessionToDb error:', err.message);
   }
 }
 
-async function loadSessionsFromDisk() {
+// Write one completed page to DB, then strip its issues array from memory so
+// that concurrent large audits do not accumulate unbounded issue data in RAM.
+function savePageAndFreeMemory(session, page) {
+  savePage(session.id, page)
+    .then(() => {
+      // Free the heavy issues array — report generation always queries the DB.
+      page.issues = null;
+    })
+    .catch(err => console.warn('[db] savePage error:', err.message));
+}
+
+// Load session metadata from DB on startup.
+async function loadSessionsFromDb() {
   try {
-    const files = await readdir(DATA_DIR);
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000; // 7 days
+    const sessions = await loadSessionMetas(7);
     let loaded = 0;
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = join(DATA_DIR, file);
-      try {
-        const stats = await stat(filePath);
-        if (stats.mtimeMs < cutoff) {
-          await unlink(filePath).catch(() => {});
-          continue;
-        }
-        const data = JSON.parse(await readFile(filePath, 'utf8'));
-        if (data?.id && !auditSessions.has(data.id)) {
-          auditSessions.set(data.id, data);
-          loaded++;
-        }
-      } catch {}
+    for (const s of sessions) {
+      if (!auditSessions.has(s.id)) {
+        auditSessions.set(s.id, s);
+        loaded++;
+      }
     }
-    if (loaded > 0) console.log(`[sessions] Restored ${loaded} session(s) from disk`);
-  } catch {
-    // DATA_DIR doesn't exist yet or is empty — that's fine
+    if (loaded > 0) console.log(`[db] Restored ${loaded} session(s) from database`);
+  } catch (err) {
+    console.warn('[db] loadSessionsFromDb error:', err.message);
   }
 }
 
@@ -172,22 +170,18 @@ function cleanOldSessions() {
   const sorted = [...auditSessions.entries()]
     .filter(([, s]) => s.status === 'completed' || s.status === 'error')
     .sort((a, b) => new Date(a[1].startTime) - new Date(b[1].startTime));
-  const toDelete = sorted.slice(0, Math.max(1, sorted.length - MAX_SESSIONS + 1));
-  toDelete.forEach(([id]) => {
-    auditSessions.delete(id);
-    unlink(join(DATA_DIR, `${id}.json`)).catch(() => {});
-  });
+  const toDelete = sorted.slice(0, Math.max(1, sorted.length - MAX_SESSIONS + 10));
+  toDelete.forEach(([id]) => auditSessions.delete(id));
+  // Old session data stays in MySQL; DB pruning happens on a daily schedule.
 }
 
-const MAX_AUDIT_DURATION_MS = 480 * 60 * 1000; // 480-minute hard cap per audit
+const MAX_AUDIT_DURATION_MS = 480 * 60 * 1000;
 
 async function processAuditQueue() {
   if (runningAudits >= MAX_CONCURRENT_AUDITS || auditQueue.length === 0) return;
   const { session } = auditQueue.shift();
   runningAudits++;
 
-  // Tracks whether the slot was already released externally (via DELETE /api/audit/:id).
-  // Prevents double-decrement of runningAudits and zombie status overwrites.
   session._cancelledExternally = false;
 
   let timeoutId;
@@ -198,8 +192,6 @@ async function processAuditQueue() {
     );
   });
 
-  // Debounce WS broadcasts during page-by-page progress to reduce serialization overhead.
-  // Status transitions (crawling → auditing → completed) are always sent immediately.
   let broadcastTimer = null;
 
   function flushBroadcast() {
@@ -210,16 +202,19 @@ async function processAuditQueue() {
   try {
     await Promise.race([
       startAudit(session, (update) => {
-        // If this audit was externally cancelled or already in a terminal state,
-        // ignore any further updates from the still-running async operation.
         if (session._cancelledExternally || session.status === 'error') return;
 
         if ('completedPage' in update) {
-          // Accumulate single page into session.pages (O(1) per update)
-          if (update.completedPage) session.pages.push(update.completedPage);
+          if (update.completedPage) {
+            const page = update.completedPage;
+            session.pages.push(page);
+            // Persist to DB and free issues from memory immediately.
+            // This is the key fix for concurrent large-site memory crashes.
+            savePageAndFreeMemory(session, page);
+          }
           const { completedPage, ...rest } = update;
           Object.assign(session, rest);
-          // Debounce: broadcast at most every 2 s during page auditing
+          // Debounce WS broadcasts to at most every 2 s during page auditing.
           if (!broadcastTimer) {
             broadcastTimer = setTimeout(() => {
               broadcastTimer = null;
@@ -227,27 +222,26 @@ async function processAuditQueue() {
             }, 2000);
           }
         } else {
-          // Status change or final completion — flush immediately
           Object.assign(session, update);
           flushBroadcast();
         }
       }),
       timeout,
     ]);
-    if (!session._cancelledExternally) await saveSessionToDisk(session);
+
+    if (!session._cancelledExternally) await saveSessionToDb(session);
   } catch (error) {
     if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
     if (!session._cancelledExternally) {
-      session.status = 'error';
-      session.error = error.message;
+      session.status  = 'error';
+      session.error   = error.message;
       session.endTime = new Date().toISOString();
       broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-      await saveSessionToDisk(session);
+      await saveSessionToDb(session);
     }
   } finally {
     clearTimeout(timeoutId);
     if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
-    // Only release the slot here if the cancel endpoint hasn't already done so.
     if (!session._cancelledExternally) {
       runningAudits--;
       processAuditQueue();
@@ -256,7 +250,6 @@ async function processAuditQueue() {
 }
 
 // ── PDF generation ─────────────────────────────────────────────────────────────
-
 async function generatePdfBuffer(htmlContent) {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
   const browser = await puppeteer.launch({
@@ -273,7 +266,6 @@ async function generatePdfBuffer(htmlContent) {
     await page.setContent(htmlContent, { waitUntil: 'networkidle0', timeout: 60000 });
     return await page.pdf({
       format: 'A4',
-      landscape: false,
       printBackground: true,
       displayHeaderFooter: false,
       margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
@@ -283,12 +275,25 @@ async function generatePdfBuffer(htmlContent) {
   }
 }
 
+// ── Helper: get session with full page+issue data for report routes ─────────────
+// During an active audit, issues are stripped from memory after each page saves.
+// Reports therefore always load the full session from MySQL.
+async function getSessionForReport(id) {
+  try {
+    const full = await getFullSession(id);
+    return full;
+  } catch (err) {
+    console.warn('[db] getSessionForReport error:', err.message);
+    // Fall back to in-memory session (issues may be null for some pages).
+    return auditSessions.get(id) || null;
+  }
+}
+
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/audit', (req, res) => {
   const { url, maxPages = 50, urlList, excludeSitemaps } = req.body;
 
-  // URL-list mode: validate each entry
   if (urlList) {
     if (!Array.isArray(urlList) || urlList.length === 0) {
       return res.status(400).json({ error: 'urlList must be a non-empty array' });
@@ -305,7 +310,6 @@ app.post('/api/audit', (req, res) => {
     }
   }
 
-  // Validate excludeSitemaps (optional, crawl mode only)
   const resolvedExcludes = [];
   if (excludeSitemaps && Array.isArray(excludeSitemaps)) {
     for (const s of excludeSitemaps) {
@@ -320,24 +324,28 @@ app.post('/api/audit', (req, res) => {
   const resolvedUrl = urlList ? urlList[0] : url;
   const auditId = uuidv4();
   const session = {
-    id: auditId,
-    url: resolvedUrl,
-    urlList: urlList || null,
+    id:              auditId,
+    url:             resolvedUrl,
+    urlList:         urlList || null,
     excludeSitemaps: resolvedExcludes.length > 0 ? resolvedExcludes : null,
-    maxPages: urlList ? urlList.length : Math.min(Math.max(1, parseInt(maxPages) || 50), 5000),
-    status: 'queued',
-    startTime: new Date().toISOString(),
-    endTime: null,
-    pages: [],
-    crawledUrls: [],
-    currentPage: null,
-    progress: { crawled: 0, total: 0, audited: 0 },
-    summary: null,
-    error: null,
-    queuePosition: auditQueue.length + 1,
+    maxPages:        urlList ? urlList.length : Math.min(Math.max(1, parseInt(maxPages) || 50), 5000),
+    status:          'queued',
+    startTime:       new Date().toISOString(),
+    endTime:         null,
+    pages:           [],
+    crawledUrls:     [],
+    currentPage:     null,
+    progress:        { crawled: 0, total: 0, audited: 0 },
+    summary:         null,
+    error:           null,
+    queuePosition:   auditQueue.length + 1,
   };
 
   auditSessions.set(auditId, session);
+
+  // Insert into DB immediately so the session is trackable from the start.
+  upsertSession(session).catch(err => console.warn('[db] initial upsertSession error:', err.message));
+
   auditQueue.push({ session });
   processAuditQueue();
 
@@ -354,30 +362,33 @@ app.get('/api/audits', (_req, res) => {
   const audits = [...auditSessions.values()]
     .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
     .map(s => ({
-      id: s.id,
-      url: s.url,
-      status: s.status,
+      id:        s.id,
+      url:       s.url,
+      status:    s.status,
       startTime: s.startTime,
-      endTime: s.endTime,
-      summary: s.summary,
+      endTime:   s.endTime,
+      summary:   s.summary,
     }));
   res.json(audits);
 });
 
-// Download HTML report — supports ?brand=planeteria|digitaldeployment|pensionx and ?autoprint=true
-app.get('/api/audit/:id/report', (req, res) => {
-  const session = auditSessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Audit not found' });
-  if (session.status !== 'completed') {
+// Full developer report — fetches complete page+issue data from DB.
+app.get('/api/audit/:id/report', async (req, res) => {
+  const meta = auditSessions.get(req.params.id);
+  if (!meta) return res.status(404).json({ error: 'Audit not found' });
+  if (meta.status !== 'completed') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
-  const brand = req.query.brand || null;
+  const session = await getSessionForReport(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+
+  const brand     = req.query.brand || null;
   const autoprint = req.query.autoprint === 'true';
   const reportHtml = generateReport(session, brand, autoprint);
 
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-  const date = new Date().toISOString().split('T')[0];
+  const date   = new Date().toISOString().split('T')[0];
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (!autoprint) {
@@ -386,35 +397,39 @@ app.get('/api/audit/:id/report', (req, res) => {
   res.send(reportHtml);
 });
 
-// Download VPAT conformance report
-app.get('/api/audit/:id/report/vpat', (req, res) => {
-  const session = auditSessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Audit not found' });
-  if (session.status !== 'completed') {
+// VPAT report
+app.get('/api/audit/:id/report/vpat', async (req, res) => {
+  const meta = auditSessions.get(req.params.id);
+  if (!meta) return res.status(404).json({ error: 'Audit not found' });
+  if (meta.status !== 'completed') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
-  const brand = req.query.brand || null;
-  const reportHtml = generateVpatReport(session, brand);
+  const session = await getSessionForReport(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
 
+  const reportHtml = generateVpatReport(session, req.query.brand || null);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(reportHtml);
 });
 
-// Download summary HTML report (client-facing, no per-page issue details)
-app.get('/api/audit/:id/report/summary', (req, res) => {
-  const session = auditSessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Audit not found' });
-  if (session.status !== 'completed') {
+// Summary report
+app.get('/api/audit/:id/report/summary', async (req, res) => {
+  const meta = auditSessions.get(req.params.id);
+  if (!meta) return res.status(404).json({ error: 'Audit not found' });
+  if (meta.status !== 'completed') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
-  const brand = req.query.brand || null;
+  const session = await getSessionForReport(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Audit not found' });
+
+  const brand     = req.query.brand || null;
   const autoprint = req.query.autoprint === 'true';
   const reportHtml = generateSummaryReport(session, brand, autoprint);
 
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-  const date = new Date().toISOString().split('T')[0];
+  const date   = new Date().toISOString().split('T')[0];
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   if (!autoprint) {
@@ -423,7 +438,7 @@ app.get('/api/audit/:id/report/summary', (req, res) => {
   res.send(reportHtml);
 });
 
-// Rescan a single page — POST body: { url: string }
+// Rescan a single page
 app.post('/api/audit/:id/rescan', async (req, res) => {
   const session = auditSessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Audit not found' });
@@ -437,7 +452,6 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
     return res.status(400).json({ error: 'Invalid URL format' });
   }
 
-  // Mark the page as rescanning so the UI can show a spinner
   const existingIdx = session.pages.findIndex(p => p.url === url);
   if (existingIdx >= 0) {
     session.pages[existingIdx] = { ...session.pages[existingIdx], status: 'rescanning' };
@@ -447,48 +461,37 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
   try {
     const result = await rescanPage(url);
 
-    // Replace or append the page result
+    // Remove old page from DB then save the fresh result.
+    await deletePageByUrl(session.id, url).catch(err =>
+      console.warn('[db] deletePageByUrl error:', err.message)
+    );
+    await savePage(session.id, result).catch(err =>
+      console.warn('[db] savePage (rescan) error:', err.message)
+    );
+
+    // Update in-memory page (strip issues — they're in DB).
+    const lightweight = { ...result, issues: null };
     if (existingIdx >= 0) {
-      session.pages[existingIdx] = result;
+      session.pages[existingIdx] = lightweight;
     } else {
-      session.pages.push(result);
+      session.pages.push(lightweight);
     }
 
-    // Recompute summary
-    const completed = session.pages.filter(p => p.status === 'completed');
-    const scores = completed.map(p => p.score).filter(s => s !== null);
-    const allIssues = completed.flatMap(p => p.issues || []);
+    // Recompute summary from DB so we get accurate totals across all pages.
+    const newSummary = await recomputeSummary(session.id);
+    session.summary  = newSummary;
 
-    session.summary = {
-      ...session.summary,
-      totalPages: session.pages.length,
-      successfulPages: completed.length,
-      errorPages: session.pages.filter(p => p.status === 'error').length,
-      averageScore: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
-      minScore: scores.length ? Math.min(...scores) : 0,
-      maxScore: scores.length ? Math.max(...scores) : 0,
-      totalIssues: allIssues.length,
-      criticalIssues: allIssues.filter(i => i.severity === 'critical').length,
-      seriousIssues: allIssues.filter(i => i.severity === 'serious').length,
-      moderateIssues: allIssues.filter(i => i.severity === 'moderate').length,
-      minorIssues: allIssues.filter(i => i.severity === 'minor').length,
-      pagesAbove90: scores.filter(s => s >= 90).length,
-      pages70to89: scores.filter(s => s >= 70 && s < 90).length,
-      pages50to69: scores.filter(s => s >= 50 && s < 70).length,
-      pagesBelow50: scores.filter(s => s < 50).length,
-    };
+    // Persist updated summary.
+    await upsertSession(session).catch(err => console.warn('[db] upsertSession (rescan) error:', err.message));
 
     broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-    await saveSessionToDisk(session);
-
     res.json({ success: true, page: result });
   } catch (err) {
     console.error('[rescan] Error:', err.message);
-    // Restore page as error if rescan itself threw unexpectedly
     if (existingIdx >= 0) {
       session.pages[existingIdx] = {
         url, status: 'error', error: err.message,
-        score: null, issues: [], issueCount: 0,
+        score: null, issues: null, issueCount: 0,
         timestamp: new Date().toISOString(),
       };
       broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
@@ -497,50 +500,44 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
   }
 });
 
-// Email report — POST body: { emails: string[], brand: string }
+// Email report
 app.post('/api/audit/:id/email', async (req, res) => {
-  const session = auditSessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Audit not found' });
-  if (session.status !== 'completed') {
+  const meta = auditSessions.get(req.params.id);
+  if (!meta) return res.status(404).json({ error: 'Audit not found' });
+  if (meta.status !== 'completed') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
   const { emails, brand } = req.body;
-
   if (!emails || !Array.isArray(emails) || emails.length === 0) {
     return res.status(400).json({ error: 'At least one email address is required' });
   }
-
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    return res.status(503).json({
-      error: 'Email is not configured on this server. Set SMTP_HOST, SMTP_USER, and SMTP_PASS environment variables.',
-    });
+    return res.status(503).json({ error: 'Email is not configured on this server.' });
   }
 
   try {
-    const brandKey = brand || null;
+    const session   = await getSessionForReport(req.params.id);
+    const brandKey  = brand || null;
     const [summaryPdf, vpatPdf] = await Promise.all([
       generatePdfBuffer(generateSummaryReport(session, brandKey, false)),
       generatePdfBuffer(generateVpatReport(session, brandKey)),
     ]);
 
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
+      host:   process.env.SMTP_HOST,
+      port:   parseInt(process.env.SMTP_PORT || '587'),
       secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+      auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
 
-    const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-    const date = new Date().toISOString().split('T')[0];
+    const domain   = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+    const date     = new Date().toISOString().split('T')[0];
     const avgScore = session.summary?.averageScore ?? 0;
 
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: emails.join(', '),
+      from:    process.env.SMTP_FROM || process.env.SMTP_USER,
+      to:      emails.join(', '),
       subject: `ADA Accessibility Report – ${session.url}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -557,16 +554,8 @@ app.post('/api/audit/:id/email', async (req, res) => {
         </div>
       `,
       attachments: [
-        {
-          filename: `accessibility-summary-${domain}-${date}.pdf`,
-          content: summaryPdf,
-          contentType: 'application/pdf',
-        },
-        {
-          filename: `vpat-report-${domain}-${date}.pdf`,
-          content: vpatPdf,
-          contentType: 'application/pdf',
-        },
+        { filename: `accessibility-summary-${domain}-${date}.pdf`, content: summaryPdf, contentType: 'application/pdf' },
+        { filename: `vpat-report-${domain}-${date}.pdf`,           content: vpatPdf,    contentType: 'application/pdf' },
       ],
     });
 
@@ -577,16 +566,14 @@ app.post('/api/audit/:id/email', async (req, res) => {
   }
 });
 
-// AI Fix — POST body: { pageUrl, issue, targetType:'live'|'dev', devUrl, username, password }
+// AI Fix
 app.post('/api/audit/:id/fix', async (req, res) => {
   const session = auditSessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Audit not found' });
   if (session.status !== 'completed') return res.status(400).json({ error: 'Audit not yet completed' });
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(503).json({
-      error: 'ANTHROPIC_API_KEY is not configured on this server. Add it to your Render environment variables.',
-    });
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY is not configured on this server.' });
   }
 
   const { pageUrl, issue, targetType, devUrl, username, password } = req.body;
@@ -594,10 +581,7 @@ app.post('/api/audit/:id/fix', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields: pageUrl, issue, username, password' });
   }
 
-  const wpBaseUrl = (targetType === 'dev' && devUrl)
-    ? new URL(devUrl).origin
-    : new URL(pageUrl).origin;
-
+  const wpBaseUrl     = (targetType === 'dev' && devUrl) ? new URL(devUrl).origin : new URL(pageUrl).origin;
   const targetPageUrl = (targetType === 'dev' && devUrl) ? devUrl : pageUrl;
 
   try {
@@ -609,11 +593,9 @@ app.post('/api/audit/:id/fix', async (req, res) => {
   }
 });
 
-// ── Saved reports (scheduler detailed reports) ─────────────────────────────────
-
+// Saved reports (scheduler detailed reports)
 app.get('/api/reports/:filename', async (req, res) => {
   const { filename } = req.params;
-  // Allow only safe filenames: alphanumeric, hyphens, underscores, dots, ending in .html
   if (!/^[\w.-]+-[0-9a-f-]{36}\.html$/.test(filename)) {
     return res.status(400).json({ error: 'Invalid report filename' });
   }
@@ -626,18 +608,14 @@ app.get('/api/reports/:filename', async (req, res) => {
   }
 });
 
-// ── Queue management ────────────────────────────────────────────────────────────
-
-// GET /api/queue — show current queue state
+// Queue management
 app.get('/api/queue', (_req, res) => {
   res.json({
     runningAudits,
     maxConcurrent: MAX_CONCURRENT_AUDITS,
-    queueLength: auditQueue.length,
+    queueLength:   auditQueue.length,
     queued: auditQueue.map(({ session }) => ({
-      id: session.id,
-      url: session.url,
-      startTime: session.startTime,
+      id: session.id, url: session.url, startTime: session.startTime,
     })),
     active: [...auditSessions.values()]
       .filter(s => s.status === 'auditing' || s.status === 'crawling')
@@ -645,13 +623,12 @@ app.get('/api/queue', (_req, res) => {
   });
 });
 
-// DELETE /api/queue — cancel all queued (not yet running) sessions
 app.delete('/api/queue', (_req, res) => {
   const cancelled = [];
   while (auditQueue.length > 0) {
     const { session } = auditQueue.shift();
-    session.status = 'error';
-    session.error = 'Cancelled — queue was cleared';
+    session.status  = 'error';
+    session.error   = 'Cancelled — queue was cleared';
     session.endTime = new Date().toISOString();
     broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
     cancelled.push(session.id);
@@ -659,7 +636,6 @@ app.delete('/api/queue', (_req, res) => {
   res.json({ cancelled, message: `Cleared ${cancelled.length} queued audit(s)` });
 });
 
-// DELETE /api/audit/:id — force-cancel a specific audit (queued or stuck-running)
 app.delete('/api/audit/:id', (req, res) => {
   const session = auditSessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Audit not found' });
@@ -671,29 +647,23 @@ app.delete('/api/audit/:id', (req, res) => {
     return res.status(400).json({ error: `Audit is already ${session.status} — nothing to cancel` });
   }
 
-  // Remove from queue if it hasn't started yet
   let wasDequeued = false;
   if (wasQueued) {
     const idx = auditQueue.findIndex(({ session: s }) => s.id === session.id);
     if (idx >= 0) {
       auditQueue.splice(idx, 1);
     } else {
-      // Already dequeued (runningAudits was incremented) but status not yet updated — holds a slot
       wasDequeued = true;
     }
   }
 
-  // Mark as cancelled — set flag BEFORE updating status so the processAuditQueue
-  // onUpdate guard sees it and stops overwriting the session state.
   if (wasActive || wasDequeued) session._cancelledExternally = true;
 
-  session.status = 'error';
-  session.error = 'Cancelled by user';
+  session.status  = 'error';
+  session.error   = 'Cancelled by user';
   session.endTime = new Date().toISOString();
   broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
 
-  // Release the running slot so the queue can proceed.
-  // processAuditQueue's finally block will see _cancelledExternally and skip its own release.
   if (wasActive || wasDequeued) {
     runningAudits = Math.max(0, runningAudits - 1);
     forceReleaseGlobalSlot();
@@ -703,13 +673,12 @@ app.delete('/api/audit/:id', (req, res) => {
   res.json({ success: true, id: session.id, wasActive, wasQueued });
 });
 
-// ── Scheduler page (protected SPA) ─────────────────────────────────────────────
+// Scheduler page
 app.get('/scheduler', (_req, res) => {
   res.sendFile(join(__dirname, 'public', 'scheduler.html'));
 });
 
-// ── Scheduler auth routes ───────────────────────────────────────────────────────
-
+// Scheduler auth
 app.post('/api/scheduler/login', (req, res) => {
   const { username, password } = req.body;
   const validUser = process.env.SCHEDULER_USER || 'admin';
@@ -728,15 +697,14 @@ app.post('/api/scheduler/logout', schedulerAuth, (req, res) => {
   res.json({ success: true });
 });
 
-// ── Scheduler CRUD routes ───────────────────────────────────────────────────────
-
+// Scheduler CRUD
 app.get('/api/scheduler/schedules', schedulerAuth, (_req, res) => {
   res.json(getSchedules());
 });
 
 app.post('/api/scheduler/schedules', schedulerAuth, async (req, res) => {
   const { name, url, maxPages, excludeSitemaps, frequency, dayOfWeek,
-          dayOfMonth, hour, minute, emails, brand, enabled } = req.body;
+          dayOfMonth, hour, minute, emails, devEmails, brand, enabled } = req.body;
 
   if (!url) return res.status(400).json({ error: 'url is required' });
   try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
@@ -751,7 +719,7 @@ app.post('/api/scheduler/schedules', schedulerAuth, async (req, res) => {
   try {
     const schedule = await addSchedule({
       name, url, maxPages, excludeSitemaps, frequency, dayOfWeek,
-      dayOfMonth, hour, minute, emails, brand, enabled,
+      dayOfMonth, hour, minute, emails, devEmails, brand, enabled,
     });
     res.status(201).json(schedule);
   } catch (err) {
@@ -760,9 +728,8 @@ app.post('/api/scheduler/schedules', schedulerAuth, async (req, res) => {
 });
 
 app.put('/api/scheduler/schedules/:id', schedulerAuth, async (req, res) => {
-  const { id } = req.params;
   try {
-    const updated = await updateSchedule(id, req.body);
+    const updated = await updateSchedule(req.params.id, req.body);
     if (!updated) return res.status(404).json({ error: 'Schedule not found' });
     res.json(updated);
   } catch (err) {
@@ -788,7 +755,6 @@ app.post('/api/scheduler/schedules/:id/run', schedulerAuth, async (req, res) => 
   }
 });
 
-// Export all schedules as a downloadable JSON backup
 app.get('/api/scheduler/schedules/export', schedulerAuth, (_req, res) => {
   const data = getSchedules();
   const date = new Date().toISOString().split('T')[0];
@@ -797,7 +763,6 @@ app.get('/api/scheduler/schedules/export', schedulerAuth, (_req, res) => {
   res.send(JSON.stringify(data, null, 2));
 });
 
-// Import schedules from a JSON backup
 app.post('/api/scheduler/schedules/import', schedulerAuth, async (req, res) => {
   if (!Array.isArray(req.body)) {
     return res.status(400).json({ error: 'Expected a JSON array of schedules' });
@@ -817,14 +782,19 @@ app.get('*', (_req, res) => {
 // ── Startup ────────────────────────────────────────────────────────────────────
 
 await mkdir(DATA_DIR, { recursive: true }).catch(() => {});
-await loadSessionsFromDisk();
+await initDb();
+await loadSessionsFromDb();
 await initScheduler(DATA_DIR);
+
+// Prune sessions older than 30 days every 24 hours.
+setInterval(() => {
+  deleteOldSessions(30).catch(err => console.warn('[db] pruneOldSessions error:', err.message));
+}, 24 * 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`ADA Accessibility Auditor running on http://localhost:${PORT}`);
-  console.log(`Session storage: ${DATA_DIR}`);
 });
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
-process.on('SIGINT', () => server.close(() => process.exit(0)));
+process.on('SIGINT',  () => server.close(() => process.exit(0)));
