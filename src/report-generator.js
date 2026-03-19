@@ -111,59 +111,59 @@ function renderIssuesTable(issues) {
 
 // All WCAG 2.1 criteria included in the VPAT (Levels A and AA)
 const WCAG_21_CRITERIA_A = [
-  { id: '1.1.1',  name: 'Non-text Content' },
-  { id: '1.2.1',  name: 'Audio-only and Video-only (Prerecorded)' },
-  { id: '1.2.2',  name: 'Captions (Prerecorded)' },
-  { id: '1.2.3',  name: 'Audio Description or Media Alternative (Prerecorded)' },
-  { id: '1.3.1',  name: 'Info and Relationships' },
-  { id: '1.3.2',  name: 'Meaningful Sequence' },
-  { id: '1.3.3',  name: 'Sensory Characteristics' },
-  { id: '1.4.1',  name: 'Use of Color' },
-  { id: '1.4.2',  name: 'Audio Control' },
-  { id: '2.1.1',  name: 'Keyboard' },
-  { id: '2.1.2',  name: 'No Keyboard Trap' },
-  { id: '2.1.4',  name: 'Character Key Shortcuts' },
-  { id: '2.2.1',  name: 'Timing Adjustable' },
-  { id: '2.2.2',  name: 'Pause, Stop, Hide' },
-  { id: '2.3.1',  name: 'Three Flashes or Below Threshold' },
-  { id: '2.4.1',  name: 'Bypass Blocks' },
-  { id: '2.4.2',  name: 'Page Titled' },
-  { id: '2.4.3',  name: 'Focus Order' },
-  { id: '2.4.4',  name: 'Link Purpose (In Context)' },
-  { id: '2.5.1',  name: 'Pointer Gestures' },
-  { id: '2.5.2',  name: 'Pointer Cancellation' },
-  { id: '2.5.3',  name: 'Label in Name' },
-  { id: '2.5.4',  name: 'Motion Actuation' },
-  { id: '3.1.1',  name: 'Language of Page' },
-  { id: '3.2.1',  name: 'On Focus' },
-  { id: '3.2.2',  name: 'On Input' },
-  { id: '3.3.1',  name: 'Error Identification' },
-  { id: '3.3.2',  name: 'Labels or Instructions' },
-  { id: '4.1.1',  name: 'Parsing' },
-  { id: '4.1.2',  name: 'Name, Role, Value' },
+  { id: '1.1.1',  name: 'Non-text Content',                                    description: 'All non-text content that is presented to the user has a text alternative that serves the equivalent purpose, except for controls/input (must have a name describing its purpose), time-based media (text alternatives provide descriptive identification), tests or exercises (text alternatives provide descriptive identification), sensory experiences (text alternatives provide descriptive identification), CAPTCHA (alternatives for different sensory perceptions are provided), and decoration/formatting/invisible content (implemented to be ignored by assistive technology).' },
+  { id: '1.2.1',  name: 'Audio-only and Video-only (Prerecorded)',              description: 'For prerecorded audio-only and prerecorded video-only media, the following are true, except when the audio or video is a media alternative for text and is clearly labeled as such: Prerecorded Audio-only: An alternative for time-based media is provided that presents equivalent information. Prerecorded Video-only: Either an alternative for time-based media or an audio track is provided that presents equivalent information.' },
+  { id: '1.2.2',  name: 'Captions (Prerecorded)',                               description: 'Captions are provided for all prerecorded audio content in synchronized media, except when the media is a media alternative for text and is clearly labeled as such.' },
+  { id: '1.2.3',  name: 'Audio Description or Media Alternative (Prerecorded)', description: 'An alternative for time-based media or audio description of the prerecorded video content is provided for synchronized media, except when the media is a media alternative for text and is clearly labeled as such.' },
+  { id: '1.3.1',  name: 'Info and Relationships',                               description: 'Information, structure, and relationships conveyed through presentation can be programmatically determined or are available in text.' },
+  { id: '1.3.2',  name: 'Meaningful Sequence',                                  description: 'When the sequence in which content is presented affects its meaning, a correct reading sequence can be programmatically determined.' },
+  { id: '1.3.3',  name: 'Sensory Characteristics',                              description: 'Instructions provided for understanding and operating content do not rely solely on sensory characteristics of components such as shape, color, size, visual location, orientation, or sound.' },
+  { id: '1.4.1',  name: 'Use of Color',                                         description: 'Color is not used as the only visual means of conveying information, indicating an action, prompting a response, or distinguishing a visual element.' },
+  { id: '1.4.2',  name: 'Audio Control',                                        description: 'If any audio on a Web page plays automatically for more than 3 seconds, either a mechanism is available to pause or stop the audio, or a mechanism is available to control audio volume independently from the overall system volume level.' },
+  { id: '2.1.1',  name: 'Keyboard',                                             description: 'All functionality of the content is operable through a keyboard interface without requiring specific timings for individual keystrokes, except where the underlying function requires input that depends on the path of the user\'s movement and not just the endpoints.' },
+  { id: '2.1.2',  name: 'No Keyboard Trap',                                     description: 'If keyboard focus can be moved to a component of the page using a keyboard interface, then focus can be moved away from that component using only a keyboard interface, and, if it requires more than unmodified arrow or tab keys or other standard exit methods, the user is advised of the method for moving focus away.' },
+  { id: '2.1.4',  name: 'Character Key Shortcuts',                              description: 'If a keyboard shortcut is implemented in content using only letter, punctuation, number, or symbol characters, then at least one of the following is true: the shortcut can be turned off, remapped to a non-character key, or is only active when that user interface component has focus.' },
+  { id: '2.2.1',  name: 'Timing Adjustable',                                    description: 'For each time limit that is set by the content, at least one of the following is true: the user can turn off, adjust, or extend the time limit, with exceptions for real-time events, essential time limits, and limits longer than 20 hours.' },
+  { id: '2.2.2',  name: 'Pause, Stop, Hide',                                    description: 'For moving, blinking, scrolling, or auto-updating information that (1) starts automatically, (2) lasts more than five seconds, and (3) is presented in parallel with other content, there is a mechanism for the user to pause, stop, or hide it, unless the movement, blinking, or scrolling is part of an activity where it is essential.' },
+  { id: '2.3.1',  name: 'Three Flashes or Below Threshold',                     description: 'Web pages do not contain anything that flashes more than three times in any one second period, or the flash is below the general flash and red flash thresholds.' },
+  { id: '2.4.1',  name: 'Bypass Blocks',                                        description: 'A mechanism is available to bypass blocks of content that are repeated on multiple Web pages.' },
+  { id: '2.4.2',  name: 'Page Titled',                                          description: 'Web pages have titles that describe topic or purpose.' },
+  { id: '2.4.3',  name: 'Focus Order',                                          description: 'If a Web page can be navigated sequentially and the navigation sequences affect meaning or operation, focusable components receive focus in an order that preserves meaning and operability.' },
+  { id: '2.4.4',  name: 'Link Purpose (In Context)',                            description: 'The purpose of each link can be determined from the link text alone or from the link text together with its programmatically determined link context, except where the purpose of the link would be ambiguous to users in general.' },
+  { id: '2.5.1',  name: 'Pointer Gestures',                                     description: 'All functionality that uses multipoint or path-based gestures for operation can be operated with a single pointer without a path-based gesture, unless a multipoint or path-based gesture is essential.' },
+  { id: '2.5.2',  name: 'Pointer Cancellation',                                 description: 'For functionality that can be operated using a single pointer, at least one of the following is true: the down-event is not used to execute the function; the action can be aborted or undone; the action is completed on the up-event and a mechanism is available to abort the action prior to completion; or completing the function on the down-event is essential.' },
+  { id: '2.5.3',  name: 'Label in Name',                                        description: 'For user interface components with labels that include text or images of text, the accessible name contains the text that is presented visually.' },
+  { id: '2.5.4',  name: 'Motion Actuation',                                     description: 'Functionality that can be operated by device motion or user motion can also be operated by user interface components and responding to the motion can be disabled to prevent accidental actuation, except where the motion is used through an accessibility-supported interface or is essential for the function.' },
+  { id: '3.1.1',  name: 'Language of Page',                                     description: 'The default human language of each Web page can be programmatically determined.' },
+  { id: '3.2.1',  name: 'On Focus',                                             description: 'If any component receives focus, it does not initiate a change of context.' },
+  { id: '3.2.2',  name: 'On Input',                                             description: 'Changing the setting of any user interface component does not automatically cause a change of context unless the user has been advised of the behavior before using the component.' },
+  { id: '3.3.1',  name: 'Error Identification',                                 description: 'If an input error is automatically detected, the item that is in error is identified and the error is described to the user in text.' },
+  { id: '3.3.2',  name: 'Labels or Instructions',                               description: 'Labels or instructions are provided when content requires user input.' },
+  { id: '4.1.1',  name: 'Parsing',                                              description: 'In content implemented using markup languages, elements have complete start and end tags, elements are nested according to their specifications, elements do not contain duplicate attributes, and any IDs are unique, except where the specifications allow these features.' },
+  { id: '4.1.2',  name: 'Name, Role, Value',                                    description: 'For all user interface components (including form elements, links, and components generated by scripts), the name and role can be programmatically determined; states, properties, and values that can be set by the user can be programmatically determined; and notification of changes to these items is available to assistive technologies.' },
 ];
 
 const WCAG_21_CRITERIA_AA = [
-  { id: '1.2.4',  name: 'Captions (Live)' },
-  { id: '1.2.5',  name: 'Audio Description (Prerecorded)' },
-  { id: '1.3.4',  name: 'Orientation' },
-  { id: '1.3.5',  name: 'Identify Input Purpose' },
-  { id: '1.4.3',  name: 'Contrast (Minimum)' },
-  { id: '1.4.4',  name: 'Resize Text' },
-  { id: '1.4.5',  name: 'Images of Text' },
-  { id: '1.4.10', name: 'Reflow' },
-  { id: '1.4.11', name: 'Non-text Contrast' },
-  { id: '1.4.12', name: 'Text Spacing' },
-  { id: '1.4.13', name: 'Content on Hover or Focus' },
-  { id: '2.4.5',  name: 'Multiple Ways' },
-  { id: '2.4.6',  name: 'Headings and Labels' },
-  { id: '2.4.7',  name: 'Focus Visible' },
-  { id: '3.1.2',  name: 'Language of Parts' },
-  { id: '3.2.3',  name: 'Consistent Navigation' },
-  { id: '3.2.4',  name: 'Consistent Identification' },
-  { id: '3.3.3',  name: 'Error Suggestion' },
-  { id: '3.3.4',  name: 'Error Prevention (Legal, Financial, Data)' },
-  { id: '4.1.3',  name: 'Status Messages' },
+  { id: '1.2.4',  name: 'Captions (Live)',                              description: 'Captions are provided for all live audio content in synchronized media.' },
+  { id: '1.2.5',  name: 'Audio Description (Prerecorded)',              description: 'Audio description is provided for all prerecorded video content in synchronized media.' },
+  { id: '1.3.4',  name: 'Orientation',                                  description: 'Content does not restrict its view and operation to a single display orientation, such as portrait or landscape, unless a specific display orientation is essential.' },
+  { id: '1.3.5',  name: 'Identify Input Purpose',                       description: 'The purpose of each input field collecting information about the user can be programmatically determined when the input field serves a purpose identified in the Input Purposes for User Interface Components section and the content is implemented using technologies with support for identifying the expected meaning for form input data.' },
+  { id: '1.4.3',  name: 'Contrast (Minimum)',                           description: 'The visual presentation of text and images of text has a contrast ratio of at least 4.5:1, except for large text (at least 3:1), incidental text or images of text, and logotypes.' },
+  { id: '1.4.4',  name: 'Resize Text',                                  description: 'Except for captions and images of text, text can be resized without assistive technology up to 200 percent without loss of content or functionality.' },
+  { id: '1.4.5',  name: 'Images of Text',                               description: 'If the technologies being used can achieve the visual presentation, text is used to convey information rather than images of text, except for images of text that are customizable to the user\'s requirements or where a particular presentation of text is essential to the information being conveyed.' },
+  { id: '1.4.10', name: 'Reflow',                                       description: 'Content can be presented without loss of information or functionality, and without requiring scrolling in two dimensions, for vertical scrolling content at a width equivalent to 320 CSS pixels and horizontal scrolling content at a height equivalent to 256 CSS pixels, except for parts of the content which require two-dimensional layout for usage or meaning.' },
+  { id: '1.4.11', name: 'Non-text Contrast',                            description: 'The visual presentation of user interface components and graphical objects has a contrast ratio of at least 3:1 against adjacent color(s), except for inactive or purely decorative components, or where the appearance of the component is determined by the user agent and not modified by the author.' },
+  { id: '1.4.12', name: 'Text Spacing',                                 description: 'No loss of content or functionality occurs by setting: line height to at least 1.5 times the font size; spacing following paragraphs to at least 2 times the font size; letter spacing to at least 0.12 times the font size; and word spacing to at least 0.16 times the font size.' },
+  { id: '1.4.13', name: 'Content on Hover or Focus',                    description: 'Where receiving and then removing pointer hover or keyboard focus triggers additional content to become visible and then hidden, all of the following are true: the additional content is dismissible without moving the pointer or keyboard focus; the pointer can be moved over the additional content without it disappearing; and the additional content remains visible until the hover or focus trigger is removed, the user dismisses it, or its information is no longer valid.' },
+  { id: '2.4.5',  name: 'Multiple Ways',                                description: 'More than one way is available to locate a Web page within a set of Web pages except where the Web page is the result of, or a step in, a process.' },
+  { id: '2.4.6',  name: 'Headings and Labels',                          description: 'Headings and labels describe topic or purpose.' },
+  { id: '2.4.7',  name: 'Focus Visible',                                description: 'Any keyboard operable user interface has a mode of operation where the keyboard focus indicator is visible.' },
+  { id: '3.1.2',  name: 'Language of Parts',                            description: 'The human language of each passage or phrase in the content can be programmatically determined except for proper names, technical terms, words of indeterminate language, and words or phrases that have become part of the vernacular of the immediately surrounding text.' },
+  { id: '3.2.3',  name: 'Consistent Navigation',                        description: 'Navigational mechanisms that are repeated on multiple Web pages within a set of Web pages occur in the same relative order each time they are repeated, unless a change is initiated by the user.' },
+  { id: '3.2.4',  name: 'Consistent Identification',                    description: 'Components that have the same functionality within a set of Web pages are identified consistently.' },
+  { id: '3.3.3',  name: 'Error Suggestion',                             description: 'If an input error is automatically detected and suggestions for correction are known, then the suggestion is provided to the user, unless it would jeopardize the security or purpose of the content.' },
+  { id: '3.3.4',  name: 'Error Prevention (Legal, Financial, Data)',    description: 'For Web pages that cause legal commitments or financial transactions, that modify or delete user-controllable data in data storage systems, or that submit user test responses, at least one of the following is true: submissions are reversible; data entered is checked for input errors and the user is provided an opportunity to correct them; or a mechanism is available for reviewing, confirming, and correcting information before finalizing the submission.' },
+  { id: '4.1.3',  name: 'Status Messages',                              description: 'In content implemented using markup languages, status messages can be programmatically determined through role or properties such that they can be presented to the user by assistive technologies without receiving focus.' },
 ];
 
 // WCAG criteria evaluated by Lighthouse + axe-core + IBM Equal Access Checker
@@ -303,7 +303,7 @@ export function generateVpatReport(session, brandKey = null) {
         `<option value="${v}"${v === conf.label ? ' selected' : ''}>${v}</option>`
       ).join('');
       return `<tr>
-        <td class="c-criteria"><strong>${c.id}</strong> ${escapeHtml(c.name)}<br><span style="font-size:9px;color:#64748b">Level ${level}</span></td>
+        <td class="c-criteria"><strong>${c.id}</strong> ${escapeHtml(c.name)}<br><span style="font-size:9px;color:#64748b">Level ${level}</span>${c.description ? `<br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">${escapeHtml(c.description)}</span>` : ''}</td>
         <td class="c-conf">
           <select class="conf-select" onchange="updateConf(this)"
             style="color:${conf.color};background:${conf.bg};border-color:${conf.border}">
@@ -414,7 +414,7 @@ export function generateVpatReport(session, brandKey = null) {
     <h2>Terms</h2>
     <p>Conformance level definitions as used in this report:</p>
     <ul class="terms-list">
-      <li><strong style="color:#16a34a">Supports</strong> &mdash; No automated issues detected; the product meets the criterion or an equivalent method exists.</li>
+      <li><strong style="color:#16a34a">Supports</strong> &mdash; The functionality of the product has at least one method that meets the criterion without known defects or meets with equivalent facilitation.</li>
       <li><strong style="color:#b45309">Partially Supports</strong> &mdash; Some functionality does not meet the criterion.</li>
       <li><strong style="color:#dc2626">Does Not Support</strong> &mdash; The majority of product functionality does not meet the criterion.</li>
       <li><strong style="color:#475569">Not Applicable</strong> &mdash; The criterion is not relevant to this product.</li>
