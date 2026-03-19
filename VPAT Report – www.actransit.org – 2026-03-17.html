@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VPAT Report – www.actransit.org – 2026-03-17</title>
+  <style>
+    @page { size: A4 portrait; margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #1e293b; background: #fff; line-height: 1.5; }
+    .page { max-width: 900px; margin: 0 auto; padding: 14px 18px; }
+    @media print { .page { padding: 12mm 14mm; } }
+    .vpat-header { display: flex; align-items: center; gap: 16px; padding-bottom: 10px; border-bottom: 3px solid #107DC2; margin-bottom: 14px; }
+    .vpat-header-text .title { font-size: 17px; font-weight: 700; color: #0f172a; }
+    .vpat-header-text .subtitle { font-size: 10px; color: #64748b; margin-top: 1px; }
+    h2 { font-size: 12px; font-weight: 700; color: #0f172a; margin: 12px 0 5px; padding-bottom: 3px; border-bottom: 2px solid #e2e8f0; }
+    .info-tbl { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; }
+    .info-tbl td { padding: 5px 10px; border: 1px solid #e2e8f0; vertical-align: top; }
+    .info-tbl td:first-child { font-weight: 600; background: #f8fafc; width: 30%; color: #475569; white-space: nowrap; }
+    .terms-list { list-style: none; font-size: 11px; margin: 6px 0 10px; }
+    .terms-list li { padding: 3px 0 3px 10px; border-left: 3px solid #e2e8f0; margin-bottom: 3px; }
+    .criteria-tbl { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0 14px; }
+    .criteria-tbl thead tr { background: #107DC2; color: #fff; }
+    .criteria-tbl thead th { padding: 6px 10px; text-align: left; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .criteria-tbl tbody tr { border-bottom: 1px solid #e2e8f0; }
+    .criteria-tbl tbody tr:nth-child(even) { background: #f8fafc; }
+    .c-criteria { padding: 6px 10px; width: 36%; vertical-align: top; }
+    .c-conf { padding: 6px 10px; width: 20%; vertical-align: top; text-align: center; }
+    .conf-pill { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 9px; font-weight: 700; border: 1px solid; white-space: nowrap; }
+    .c-remarks { padding: 6px 10px; width: 44%; vertical-align: top; font-size: 10px; color: #475569; }
+    .disclaimer { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px 12px; font-size: 10px; color: #64748b; margin-top: 14px; }
+    .footer { text-align: center; font-size: 9px; color: #94a3b8; margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+    .print-btn { position: fixed; top: 16px; right: 16px; background: #107DC2; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 1000; }
+    .print-btn:hover { opacity: 0.9; }
+    @media print {
+      .print-btn { display: none; }
+      .criteria-tbl { page-break-inside: auto; }
+      h2 { page-break-after: avoid; }
+      tr { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <button class="print-btn" onclick="window.print()">Print / Save PDF</button>
+  <div class="page">
+
+    <!-- Header -->
+    <div class="vpat-header">
+      <div><img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria" style="max-height:36px;max-width:160px;object-fit:contain;"></div>
+      <div class="vpat-header-text">
+        <div class="title">Accessibility Conformance Report</div>
+        <div class="subtitle">WCAG Edition &mdash; Based on VPAT&reg; Version 2.4</div>
+      </div>
+    </div>
+
+    <!-- Product Information -->
+    <h2>Product Information</h2>
+    <table class="info-tbl">
+      <tr><td>Product / Service Name</td><td>https://www.actransit.org</td></tr>
+      <tr><td>Report Date</td><td>March 17, 2026</td></tr>
+      <tr><td>Version</td><td>Live website evaluated on March 17, 2026</td></tr>
+      <tr><td>Vendor / Evaluator</td><td>Planeteria</td></tr>
+      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse, Axe Tools, and IBM Equal Access Checker. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
+    </table>
+
+    <!-- Evaluation Methods -->
+    <h2>Evaluation Methods Used</h2>
+    <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>Axe Tools</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>88</strong> pages of <em>https://www.actransit.org</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
+    <p style="margin-top:5px;">Overall results: Average score <strong>100/100</strong> &bull; 42 total issues found &bull; 0 critical &bull; 14 serious &bull; 28 moderate &bull; 0 minor.</p>
+
+    <!-- Applicable Standards -->
+    <h2>Applicable Standards / Guidelines</h2>
+    <table class="info-tbl">
+      <tr><td>Standard / Guideline</td><td>Included In Report</td></tr>
+      <tr><td>Web Content Accessibility Guidelines 2.1</td><td>Level A (Yes) &bull; Level AA (Yes) &bull; Level AAA (No)</td></tr>
+    </table>
+
+    <!-- Terms -->
+    <h2>Terms</h2>
+    <p>Conformance level definitions as used in this report:</p>
+    <ul class="terms-list">
+      <li><strong style="color:#16a34a">Supports</strong> &mdash; The functionality of the product has at least one method that meets the criterion without known defects or meets with equivalent facilitation.</li>
+      <li><strong style="color:#b45309">Partially Supports</strong> &mdash; Some functionality does not meet the criterion.</li>
+      <li><strong style="color:#dc2626">Does Not Support</strong> &mdash; The majority of product functionality does not meet the criterion.</li>
+      <li><strong style="color:#475569">Not Applicable</strong> &mdash; The criterion is not relevant to this product.</li>
+      <li><strong style="color:#92400e">Not Evaluated</strong> &mdash; Not evaluated via automated testing; manual review recommended.</li>
+    </ul>
+
+    <!-- Table 1: Level A -->
+    <h2>WCAG 2.1 Table 1 &mdash; Level A Success Criteria</h2>
+    <table class="criteria-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Criteria</th>
+          <th style="width:20%">Conformance Level</th>
+          <th style="width:44%">Remarks and Explanations</th>
+        </tr>
+      </thead>
+      <tbody><tr>
+        <td class="c-criteria"><strong>1.1.1</strong> Non-text Content<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">All non-text content that is presented to the user has a text alternative that serves the equivalent purpose, except for controls/input (must have a name describing its purpose), time-based media (text alternatives provide descriptive identification), tests or exercises (text alternatives provide descriptive identification), sensory experiences (text alternatives provide descriptive identification), CAPTCHA (alternatives for different sensory perceptions are provided), and decoration/formatting/invisible content (implemented to be ignored by assistive technology).</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.2.1</strong> Audio-only and Video-only (Prerecorded)<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For prerecorded audio-only and prerecorded video-only media, the following are true, except when the audio or video is a media alternative for text and is clearly labeled as such: Prerecorded Audio-only: An alternative for time-based media is provided that presents equivalent information. Prerecorded Video-only: Either an alternative for time-based media or an audio track is provided that presents equivalent information.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.2.2</strong> Captions (Prerecorded)<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Captions are provided for all prerecorded audio content in synchronized media, except when the media is a media alternative for text and is clearly labeled as such.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.2.3</strong> Audio Description or Media Alternative (Prerecorded)<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">An alternative for time-based media or audio description of the prerecorded video content is provided for synchronized media, except when the media is a media alternative for text and is clearly labeled as such.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.3.1</strong> Info and Relationships<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Information, structure, and relationships conveyed through presentation can be programmatically determined or are available in text.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#b45309;background:#fffbeb;border-color:#fcd34d">Partially Supports</span></td>
+        <td class="c-remarks">Issues detected on <strong>28</strong> of 88 pages. <br><strong>Issues:</strong> Lists do not contain only &lt;li&gt; elements and script supporting elements; Heading elements are not in a sequentially-descending order. <br><strong>Elements affected:</strong> 49.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.3.2</strong> Meaningful Sequence<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">When the sequence in which content is presented affects its meaning, a correct reading sequence can be programmatically determined.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.3.3</strong> Sensory Characteristics<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Instructions provided for understanding and operating content do not rely solely on sensory characteristics of components such as shape, color, size, visual location, orientation, or sound.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.1</strong> Use of Color<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Color is not used as the only visual means of conveying information, indicating an action, prompting a response, or distinguishing a visual element.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.2</strong> Audio Control<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If any audio on a Web page plays automatically for more than 3 seconds, either a mechanism is available to pause or stop the audio, or a mechanism is available to control audio volume independently from the overall system volume level.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.1.1</strong> Keyboard<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">All functionality of the content is operable through a keyboard interface without requiring specific timings for individual keystrokes, except where the underlying function requires input that depends on the path of the user's movement and not just the endpoints.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.1.2</strong> No Keyboard Trap<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If keyboard focus can be moved to a component of the page using a keyboard interface, then focus can be moved away from that component using only a keyboard interface, and, if it requires more than unmodified arrow or tab keys or other standard exit methods, the user is advised of the method for moving focus away.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.1.4</strong> Character Key Shortcuts<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If a keyboard shortcut is implemented in content using only letter, punctuation, number, or symbol characters, then at least one of the following is true: the shortcut can be turned off, remapped to a non-character key, or is only active when that user interface component has focus.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#475569;background:#f1f5f9;border-color:#94a3b8">Not Applicable</span></td>
+        <td class="c-remarks">The criterion is not relevant to this product.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.2.1</strong> Timing Adjustable<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For each time limit that is set by the content, at least one of the following is true: the user can turn off, adjust, or extend the time limit, with exceptions for real-time events, essential time limits, and limits longer than 20 hours.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.2.2</strong> Pause, Stop, Hide<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For moving, blinking, scrolling, or auto-updating information that (1) starts automatically, (2) lasts more than five seconds, and (3) is presented in parallel with other content, there is a mechanism for the user to pause, stop, or hide it, unless the movement, blinking, or scrolling is part of an activity where it is essential.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.3.1</strong> Three Flashes or Below Threshold<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Web pages do not contain anything that flashes more than three times in any one second period, or the flash is below the general flash and red flash thresholds.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#475569;background:#f1f5f9;border-color:#94a3b8">Not Applicable</span></td>
+        <td class="c-remarks">The criterion is not relevant to this product.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.1</strong> Bypass Blocks<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">A mechanism is available to bypass blocks of content that are repeated on multiple Web pages.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.2</strong> Page Titled<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Web pages have titles that describe topic or purpose.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.3</strong> Focus Order<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If a Web page can be navigated sequentially and the navigation sequences affect meaning or operation, focusable components receive focus in an order that preserves meaning and operability.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.4</strong> Link Purpose (In Context)<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">The purpose of each link can be determined from the link text alone or from the link text together with its programmatically determined link context, except where the purpose of the link would be ambiguous to users in general.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#b45309;background:#fffbeb;border-color:#fcd34d">Partially Supports</span></td>
+        <td class="c-remarks">Issues detected on <strong>6</strong> of 88 pages. <br><strong>Issues:</strong> Links do not have a discernible name. <br><strong>Elements affected:</strong> 12.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.5.1</strong> Pointer Gestures<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">All functionality that uses multipoint or path-based gestures for operation can be operated with a single pointer without a path-based gesture, unless a multipoint or path-based gesture is essential.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#475569;background:#f1f5f9;border-color:#94a3b8">Not Applicable</span></td>
+        <td class="c-remarks">The criterion is not relevant to this product.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.5.2</strong> Pointer Cancellation<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For functionality that can be operated using a single pointer, at least one of the following is true: the down-event is not used to execute the function; the action can be aborted or undone; the action is completed on the up-event and a mechanism is available to abort the action prior to completion; or completing the function on the down-event is essential.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#475569;background:#f1f5f9;border-color:#94a3b8">Not Applicable</span></td>
+        <td class="c-remarks">The criterion is not relevant to this product.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.5.3</strong> Label in Name<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For user interface components with labels that include text or images of text, the accessible name contains the text that is presented visually.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.5.4</strong> Motion Actuation<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Functionality that can be operated by device motion or user motion can also be operated by user interface components and responding to the motion can be disabled to prevent accidental actuation, except where the motion is used through an accessibility-supported interface or is essential for the function.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#475569;background:#f1f5f9;border-color:#94a3b8">Not Applicable</span></td>
+        <td class="c-remarks">The criterion is not relevant to this product.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.1.1</strong> Language of Page<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">The default human language of each Web page can be programmatically determined.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.2.1</strong> On Focus<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If any component receives focus, it does not initiate a change of context.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.2.2</strong> On Input<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Changing the setting of any user interface component does not automatically cause a change of context unless the user has been advised of the behavior before using the component.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.3.1</strong> Error Identification<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If an input error is automatically detected, the item that is in error is identified and the error is described to the user in text.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.3.2</strong> Labels or Instructions<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Labels or instructions are provided when content requires user input.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>4.1.1</strong> Parsing<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">In content implemented using markup languages, elements have complete start and end tags, elements are nested according to their specifications, elements do not contain duplicate attributes, and any IDs are unique, except where the specifications allow these features.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>4.1.2</strong> Name, Role, Value<br><span style="font-size:9px;color:#64748b">Level A</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For all user interface components (including form elements, links, and components generated by scripts), the name and role can be programmatically determined; states, properties, and values that can be set by the user can be programmatically determined; and notification of changes to these items is available to assistive technologies.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#b45309;background:#fffbeb;border-color:#fcd34d">Partially Supports</span></td>
+        <td class="c-remarks">Issues detected on <strong>8</strong> of 88 pages. <br><strong>Issues:</strong> Frame or iframe elements do not have a title; Toggle fields do not have accessible names. <br><strong>Elements affected:</strong> 22.</td>
+      </tr></tbody>
+    </table>
+
+    <!-- Table 2: Level AA -->
+    <h2>WCAG 2.1 Table 2 &mdash; Level AA Success Criteria</h2>
+    <table class="criteria-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Criteria</th>
+          <th style="width:20%">Conformance Level</th>
+          <th style="width:44%">Remarks and Explanations</th>
+        </tr>
+      </thead>
+      <tbody><tr>
+        <td class="c-criteria"><strong>1.2.4</strong> Captions (Live)<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Captions are provided for all live audio content in synchronized media.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#475569;background:#f1f5f9;border-color:#94a3b8">Not Applicable</span></td>
+        <td class="c-remarks">The criterion is not relevant to this product.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.2.5</strong> Audio Description (Prerecorded)<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Audio description is provided for all prerecorded video content in synchronized media.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.3.4</strong> Orientation<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Content does not restrict its view and operation to a single display orientation, such as portrait or landscape, unless a specific display orientation is essential.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.3.5</strong> Identify Input Purpose<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">The purpose of each input field collecting information about the user can be programmatically determined when the input field serves a purpose identified in the Input Purposes for User Interface Components section and the content is implemented using technologies with support for identifying the expected meaning for form input data.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.3</strong> Contrast (Minimum)<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">The visual presentation of text and images of text has a contrast ratio of at least 4.5:1, except for large text (at least 3:1), incidental text or images of text, and logotypes.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#b45309;background:#fffbeb;border-color:#fcd34d">Partially Supports</span></td>
+        <td class="c-remarks">Issues detected on <strong>6</strong> of 88 pages. <br><strong>Issues:</strong> Background and foreground colors do not have a sufficient contrast ratio. <br><strong>Elements affected:</strong> 30.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.4</strong> Resize Text<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Except for captions and images of text, text can be resized without assistive technology up to 200 percent without loss of content or functionality.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.5</strong> Images of Text<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If the technologies being used can achieve the visual presentation, text is used to convey information rather than images of text, except for images of text that are customizable to the user's requirements or where a particular presentation of text is essential to the information being conveyed.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.10</strong> Reflow<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Content can be presented without loss of information or functionality, and without requiring scrolling in two dimensions, for vertical scrolling content at a width equivalent to 320 CSS pixels and horizontal scrolling content at a height equivalent to 256 CSS pixels, except for parts of the content which require two-dimensional layout for usage or meaning.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.11</strong> Non-text Contrast<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">The visual presentation of user interface components and graphical objects has a contrast ratio of at least 3:1 against adjacent color(s), except for inactive or purely decorative components, or where the appearance of the component is determined by the user agent and not modified by the author.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.12</strong> Text Spacing<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">No loss of content or functionality occurs by setting: line height to at least 1.5 times the font size; spacing following paragraphs to at least 2 times the font size; letter spacing to at least 0.12 times the font size; and word spacing to at least 0.16 times the font size.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>1.4.13</strong> Content on Hover or Focus<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Where receiving and then removing pointer hover or keyboard focus triggers additional content to become visible and then hidden, all of the following are true: the additional content is dismissible without moving the pointer or keyboard focus; the pointer can be moved over the additional content without it disappearing; and the additional content remains visible until the hover or focus trigger is removed, the user dismisses it, or its information is no longer valid.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.5</strong> Multiple Ways<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">More than one way is available to locate a Web page within a set of Web pages except where the Web page is the result of, or a step in, a process.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">The site provides two independent navigation mechanisms meeting this criterion: (1) a persistent global navigation menu in the site header, and (2) a site-wide search function returning relevant results, both present on all pages via a shared CMS template. The navigation menu was keyboard-tested and confirmed operable; search was tested with representative queries and returns relevant content; the search form has a proper programmatic label. Representative pages from across different sections were verified. Pages within sequential process flows (form journeys, payment steps) are exempt per WCAG 2.4.5 and were excluded from this assessment.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.6</strong> Headings and Labels<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Headings and labels describe topic or purpose.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>2.4.7</strong> Focus Visible<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Any keyboard operable user interface has a mode of operation where the keyboard focus indicator is visible.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.1.2</strong> Language of Parts<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">The human language of each passage or phrase in the content can be programmatically determined except for proper names, technical terms, words of indeterminate language, and words or phrases that have become part of the vernacular of the immediately surrounding text.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.2.3</strong> Consistent Navigation<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Navigational mechanisms that are repeated on multiple Web pages within a set of Web pages occur in the same relative order each time they are repeated, unless a change is initiated by the user.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">Navigation verified on Home Page. Site uses a single CMS. All internal pages share the same header/footer component. Navigation order is consistent by implementation.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.2.4</strong> Consistent Identification<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">Components that have the same functionality within a set of Web pages are identified consistently.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#16a34a;background:#f0fdf4;border-color:#86efac">Supports</span></td>
+        <td class="c-remarks">No issues detected across 88 pages audited.</td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.3.3</strong> Error Suggestion<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">If an input error is automatically detected and suggestions for correction are known, then the suggestion is provided to the user, unless it would jeopardize the security or purpose of the content.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>3.3.4</strong> Error Prevention (Legal, Financial, Data)<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">For Web pages that cause legal commitments or financial transactions, that modify or delete user-controllable data in data storage systems, or that submit user test responses, at least one of the following is true: submissions are reversible; data entered is checked for input errors and the user is provided an opportunity to correct them; or a mechanism is available for reviewing, confirming, and correcting information before finalizing the submission.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr><tr>
+        <td class="c-criteria"><strong>4.1.3</strong> Status Messages<br><span style="font-size:9px;color:#64748b">Level AA</span><br><span style="font-size:9px;color:#475569;display:block;margin-top:3px;line-height:1.4">In content implemented using markup languages, status messages can be programmatically determined through role or properties such that they can be presented to the user by assistive technologies without receiving focus.</span></td>
+        <td class="c-conf"><span class="conf-pill" style="color:#92400e;background:#fffbeb;border-color:#d97706">Not Evaluated</span></td>
+        <td class="c-remarks"><em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em></td>
+      </tr></tbody>
+    </table>
+
+    <!-- Legal Disclaimer -->
+    <div class="disclaimer">
+      <strong>Legal Disclaimer:</strong> "Voluntary Product Accessibility Template" and "VPAT" are registered service marks of the Information Technology Industry Council (ITI). This report was generated using automated accessibility testing via Google Lighthouse, Axe Tools, and IBM Equal Access Checker, and covers only criteria detectable by automated means. "Supports" indicates no automated issues were detected and does not constitute a guarantee of full WCAG conformance. Manual testing by qualified accessibility professionals is recommended for a complete conformance assessment. This report reflects the state of the website as of March 17, 2026.
+    </div>
+
+    <div class="footer">
+      Generated by Planeteria &bull; Powered by Google Lighthouse, Axe Tools &amp; IBM Equal Access Checker &bull; Tuesday, March 17, 2026
+    </div>
+  </div>
+  
+</body>
+</html>
