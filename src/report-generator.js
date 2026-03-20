@@ -166,6 +166,19 @@ const WCAG_21_CRITERIA_AA = [
   { id: '4.1.3',  name: 'Status Messages',                              description: 'In content implemented using markup languages, status messages can be programmatically determined through role or properties such that they can be presented to the user by assistive technologies without receiving focus.' },
 ];
 
+// WCAG 2.2 criteria added in the 2023 revision (Level A and AA only, not AAA)
+const WCAG_22_CRITERIA_A = [
+  { id: '3.2.6', name: 'Consistent Help',   description: 'If a Web page contains any of the following help mechanisms, and those mechanisms are repeated on multiple Web pages within a set of Web pages, they occur in the same order relative to other page content: human contact details; human contact mechanism; self-help option; a fully automated contact mechanism.' },
+  { id: '3.3.7', name: 'Redundant Entry',   description: 'Information previously entered by or provided to the user that is required to be entered again in the same process is either auto-populated or available for the user to select, except when re-entering the information is essential, the information is required to ensure the security of the content, or the previously entered information is no longer valid.' },
+];
+
+const WCAG_22_CRITERIA_AA = [
+  { id: '2.4.11', name: 'Focus Not Obscured (Minimum)', description: 'When a user interface component receives keyboard focus, the component is not entirely hidden due to author-created content.' },
+  { id: '2.5.7', name: 'Dragging Movements',            description: 'All functionality that uses a dragging movement for operation can be achieved by a single pointer without dragging, unless dragging is essential or the functionality is determined by the user agent and not modified by the author.' },
+  { id: '2.5.8', name: 'Target Size (Minimum)',         description: 'The size of the target for pointer inputs is at least 24 by 24 CSS pixels, except where: the target offset is sufficient; the target is inline; a user agent default size is available; the target presentation is essential to the information being conveyed.' },
+  { id: '3.3.8', name: 'Accessible Authentication (Minimum)', description: 'A cognitive function test (such as remembering a password or solving a puzzle) is not required for any step in an authentication process unless that step provides at least one of: an alternative authentication method that does not rely on a cognitive function test; a mechanism is available to assist the user in completing the cognitive function test; the cognitive function test is to recognise objects; the cognitive function test is to identify non-text content the user provided to the Web site.' },
+];
+
 // WCAG criteria evaluated by Lighthouse + axe-core + IBM Equal Access Checker
 const LIGHTHOUSE_TESTED_WCAG = new Set([
   // Lighthouse
@@ -187,6 +200,7 @@ export function generateVpatReport(session, brandKey = null) {
   const brand = BRANDS[brandKey] || null;
   const accentColor = brand?.accentColor || '#107DC2';
   const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
+  const includeWcag22 = !!session.wcag22;
 
   const { url, summary, pages, startTime } = session;
   const hostname = new URL(url).hostname;
@@ -234,11 +248,21 @@ export function generateVpatReport(session, brandKey = null) {
     '2.5.4', // Motion Actuation — only applies if device motion/orientation is used for input
   ]);
 
+  // When WCAG 2.2 was checked, extend the tested set so those criteria get
+  // proper Supports / Partially Supports / Does Not Support values.
+  const testedWcag = includeWcag22
+    ? new Set([
+        ...LIGHTHOUSE_TESTED_WCAG,
+        ...WCAG_22_CRITERIA_A.map(c => c.id),
+        ...WCAG_22_CRITERIA_AA.map(c => c.id),
+      ])
+    : LIGHTHOUSE_TESTED_WCAG;
+
   function getConformance(wcagId) {
     if (NOT_APPLICABLE_WCAG.has(wcagId)) {
       return { label: 'Not Applicable', color: '#475569', bg: '#f1f5f9', border: '#94a3b8' };
     }
-    if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
+    if (!testedWcag.has(wcagId)) {
       return { label: 'Not Evaluated', color: '#92400e', bg: '#fffbeb', border: '#d97706' };
     }
     const data = issuesByWcag[wcagId];
@@ -446,6 +470,33 @@ export function generateVpatReport(session, brandKey = null) {
       </thead>
       <tbody>${renderCriteriaRows(WCAG_21_CRITERIA_AA, 'AA')}</tbody>
     </table>
+
+    ${includeWcag22 ? `
+    <!-- Table 3: WCAG 2.2 -->
+    <h2>WCAG 2.2 Table 3 &mdash; Level A Success Criteria <span style="font-size:9px;font-weight:400;color:#64748b;margin-left:6px">(new in WCAG 2.2)</span></h2>
+    <table class="criteria-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Criteria</th>
+          <th style="width:20%">Conformance Level</th>
+          <th style="width:44%">Remarks and Explanations</th>
+        </tr>
+      </thead>
+      <tbody>${renderCriteriaRows(WCAG_22_CRITERIA_A, 'A')}</tbody>
+    </table>
+
+    <h2>WCAG 2.2 Table 4 &mdash; Level AA Success Criteria <span style="font-size:9px;font-weight:400;color:#64748b;margin-left:6px">(new in WCAG 2.2)</span></h2>
+    <table class="criteria-tbl">
+      <thead>
+        <tr>
+          <th style="width:36%">Criteria</th>
+          <th style="width:20%">Conformance Level</th>
+          <th style="width:44%">Remarks and Explanations</th>
+        </tr>
+      </thead>
+      <tbody>${renderCriteriaRows(WCAG_22_CRITERIA_AA, 'AA')}</tbody>
+    </table>
+    ` : ''}
 
     <!-- Legal Disclaimer -->
     <div class="disclaimer">
