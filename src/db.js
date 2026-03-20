@@ -13,6 +13,12 @@
 
 import mysql from 'mysql2/promise';
 
+// SSL is required by some providers (e.g. TiDB Cloud, PlanetScale).
+// Set MYSQL_SSL=true in Render environment variables to enable it.
+const sslConfig = process.env.MYSQL_SSL === 'true'
+  ? { ssl: { rejectUnauthorized: true } }
+  : {};
+
 const pool = mysql.createPool({
   host:             process.env.MYSQL_HOST || '147.182.205.221',
   port:             parseInt(process.env.MYSQL_PORT || '3306'),
@@ -22,9 +28,10 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit:  10,
   queueLimit:       0,
-  timezone:         'Z',       // store/retrieve datetimes as UTC
+  timezone:         'Z',
   charset:          'utf8mb4',
   connectTimeout:   10000,
+  ...sslConfig,
 });
 
 // ── Table initialisation ──────────────────────────────────────────────────────
