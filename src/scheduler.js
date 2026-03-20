@@ -96,6 +96,8 @@ async function sendDevReport(session, schedule, reportUrl) {
   });
 
   const avg = session.summary?.averageScore ?? 0;
+  const baseUrl    = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const resultsUrl = `${baseUrl}/?auditId=${session.id}`;
 
   await transporter.sendMail({
     from:    process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -113,11 +115,12 @@ async function sendDevReport(session, schedule, reportUrl) {
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
         </table>
         <p>
-          <a href="${reportUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">
-            Download Full Report
+          <a href="${resultsUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;margin-right:12px;">
+            View Audit Results &amp; Re-scan Pages
           </a>
+          ${reportUrl ? `<a href="${reportUrl}" style="display:inline-block;padding:10px 20px;background:#475569;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">Download Full Report</a>` : ''}
         </p>
-        <p style="font-size:12px;color:#94a3b8;margin-top:8px;">This link is valid for 30 days.</p>
+        ${reportUrl ? '<p style="font-size:12px;color:#94a3b8;margin-top:8px;">Report download link is valid for 30 days.</p>' : ''}
         <p style="font-size:12px;color:#94a3b8;margin-top:32px;">Scheduled report by Planeteria Inquiros ADA Checker</p>
       </div>
     `,
@@ -145,9 +148,11 @@ async function sendReport(session, schedule) {
     auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
   });
 
-  const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-  const date   = new Date().toISOString().split('T')[0];
-  const avg    = session.summary?.averageScore ?? 0;
+  const domain     = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+  const date       = new Date().toISOString().split('T')[0];
+  const avg        = session.summary?.averageScore ?? 0;
+  const baseUrl    = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const resultsUrl = `${baseUrl}/?auditId=${session.id}`;
 
   await transporter.sendMail({
     from:    process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -171,6 +176,11 @@ async function sendReport(session, schedule) {
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious Issues</td>
               <td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
         </table>
+        <p>
+          <a href="${resultsUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">
+            View Audit Results &amp; Re-scan Pages
+          </a>
+        </p>
         <p style="font-size:12px;color:#94a3b8;margin-top:32px;">
           Scheduled report by Planeteria Inquiros ADA Checker &bull; Powered by Google Lighthouse, Axe Tools &amp; IBM Equal Access Checker
         </p>

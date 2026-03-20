@@ -154,6 +154,7 @@ async function loadExistingAudit(auditId) {
     const session = await res.json();
     currentAuditId = auditId;
     currentSession = session;
+    history.pushState({}, '', `?auditId=${auditId}`);
 
     if (session.status === 'completed') {
       renderResults(session);
@@ -234,6 +235,9 @@ document.getElementById('audit-form').addEventListener('submit', async (e) => {
 
     currentAuditId = data.auditId;
     currentSession = data.session;
+
+    // Push ?auditId= to URL so the page is bookmarkable / shareable
+    history.pushState({}, '', `?auditId=${data.auditId}`);
 
     showProgress(data.session);
     connectWebSocket(data.auditId);
@@ -1047,4 +1051,10 @@ function renderTopbarBrand(el) {
 // Inject brand into progress topbar on load
 renderTopbarBrand(document.getElementById('progress-brand'));
 
-initLanding();
+// Deep-link: if URL has ?auditId= load that audit directly
+const _initAuditId = new URLSearchParams(window.location.search).get('auditId');
+if (_initAuditId) {
+  loadExistingAudit(_initAuditId);
+} else {
+  initLanding();
+}
