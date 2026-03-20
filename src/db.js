@@ -95,7 +95,9 @@ export async function initDb() {
         id          INT           NOT NULL AUTO_INCREMENT PRIMARY KEY,
         page_id     INT           NOT NULL,
         session_id  VARCHAR(36)   NOT NULL,
+        issue_id    VARCHAR(150),
         wcag        VARCHAR(20),
+        wcag_level  VARCHAR(10),
         severity    VARCHAR(20),
         title       VARCHAR(1000),
         description TEXT,
@@ -107,6 +109,14 @@ export async function initDb() {
         INDEX idx_ai_severity (severity)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // Backfill columns added after initial deploy — safe to run on every startup
+    for (const col of [
+      "ALTER TABLE audit_issues ADD COLUMN IF NOT EXISTS issue_id   VARCHAR(150) NULL",
+      "ALTER TABLE audit_issues ADD COLUMN IF NOT EXISTS wcag_level VARCHAR(10)  NULL",
+    ]) {
+      await conn.execute(col).catch(() => {}); // ignore if already exists / older MySQL
+    }
 
     // schedules — replaces data/schedules.json
     await conn.execute(`
@@ -267,7 +277,9 @@ export async function savePage(sessionId, page) {
     const rows = page.issues.map(issue => [
       pageId,
       sessionId,
+      issue.id          || null,
       issue.wcag        || null,
+      issue.wcagLevel   || null,
       issue.severity    || null,
       (issue.title      || '').substring(0, 1000),
       issue.description || null,
@@ -276,7 +288,7 @@ export async function savePage(sessionId, page) {
     ]);
     await pool.query(
       `INSERT INTO audit_issues
-         (page_id, session_id, wcag, severity, title, description, issue_count, elements)
+         (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
        VALUES ?`,
       [rows]
     );
@@ -339,7 +351,9 @@ export async function getFullSession(sessionId) {
     for (const issue of issueRows) {
       if (!issueMap[issue.page_id]) issueMap[issue.page_id] = [];
       issueMap[issue.page_id].push({
+        id:          issue.issue_id   || null,
         wcag:        issue.wcag,
+        wcagLevel:   issue.wcag_level || null,
         severity:    issue.severity,
         title:       issue.title,
         description: issue.description,

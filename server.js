@@ -371,16 +371,24 @@ app.post('/api/audit', (req, res) => {
 
 app.get('/api/audit/:id', async (req, res) => {
   const session = auditSessions.get(req.params.id);
-  if (session) return res.json(sanitizeSession(session));
 
-  // Not in memory — try loading from DB (supports deep-linked past audits)
+  // Active (non-completed) sessions: return in-memory state for real-time fidelity.
+  if (session && session.status !== 'completed' && session.status !== 'error') {
+    return res.json(sanitizeSession(session));
+  }
+
+  // Completed/error sessions: always load from DB so page issues (nulled from
+  // memory after DB save) are included in the response.
   try {
     const dbSession = await getFullSession(req.params.id);
-    if (!dbSession) return res.status(404).json({ error: 'Audit not found' });
-    res.json(sanitizeSession(dbSession));
-  } catch {
-    res.status(404).json({ error: 'Audit not found' });
+    if (dbSession) return res.json(sanitizeSession(dbSession));
+  } catch (err) {
+    console.warn('[db] getFullSession error in GET /api/audit/:id:', err.message);
   }
+
+  // Fall back to in-memory if DB is unavailable
+  if (session) return res.json(sanitizeSession(session));
+  res.status(404).json({ error: 'Audit not found' });
 });
 
 app.get('/api/audits', (_req, res) => {
@@ -559,7 +567,10 @@ app.post('/api/audit/:id/email', async (req, res) => {
     const domain   = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
     const date     = new Date().toISOString().split('T')[0];
     const avgScore = session.summary?.averageScore ?? 0;
-    const baseUrl  = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+    // Prefer explicit BASE_URL env var; fall back to detecting from the request
+    const proto    = req.get('x-forwarded-proto') || req.protocol;
+    const host     = req.get('x-forwarded-host')  || req.get('host');
+    const baseUrl  = (process.env.BASE_URL || `${proto}://${host}`).replace(/\/$/, '');
     const resultsUrl = `${baseUrl}/?auditId=${session.id}`;
 
     await transporter.sendMail({

@@ -296,7 +296,9 @@ function connectWebSocket(auditId) {
 
     if (data.status === 'completed') {
       saveRecentAudit(auditId, data.url, data.summary?.averageScore ?? null, 'completed');
-      renderResults(data);
+      // Re-fetch from API: the in-memory session has page.issues nulled (freed for
+      // memory savings after DB save). The API now loads full issues from DB.
+      loadExistingAudit(auditId);
     } else if (data.status === 'error') {
       saveRecentAudit(auditId, data.url, null, 'error');
       exitScanningMode();
