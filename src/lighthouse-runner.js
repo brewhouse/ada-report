@@ -533,9 +533,21 @@ export async function runLighthouseAudit(url, browser) {
     (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2)
   );
 
+  // Adjust Lighthouse score downward for additional issues found by axe/IBM.
+  // Lighthouse already reflects its own findings, so only extra issues penalise.
+  const extraIssues = [...axeIssues, ...ibmIssues];
+  const PENALTY   = { critical: 5, serious: 3, moderate: 1, minor: 0.5 };
+  const PENALTY_CAP = { critical: 20, serious: 12, moderate: 6, minor: 3 };
+  let totalPenalty = 0;
+  for (const sev of ['critical', 'serious', 'moderate', 'minor']) {
+    const count = extraIssues.filter(i => i.severity === sev).length;
+    totalPenalty += Math.min(count * PENALTY[sev], PENALTY_CAP[sev]);
+  }
+  const adjustedScore = Math.max(0, Math.round(score - totalPenalty));
+
   return {
     url,
-    score,
+    score: adjustedScore,
     issues: allIssues,
     issueCount: allIssues.length,
     status: 'completed',
