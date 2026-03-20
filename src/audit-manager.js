@@ -320,7 +320,7 @@ async function _runAudit(session, onUpdate) {
 
     // Phase 5: Compute summary
     const scores = completed.map(p => p.score).filter(s => s !== null);
-    const allIssues = completed.flatMap(p => p.issues);
+    const allIssues = completed.flatMap(p => p.issues || []);
 
     const summary = {
       totalPages: pages.length,
