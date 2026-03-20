@@ -116,6 +116,7 @@ let scanLivePageCount = 0;
 function showView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(`view-${name}`).classList.add('active');
+  if (name !== 'landing') stopLandingQueuePoll();
 }
 
 // ===================== LANDING =====================
@@ -123,7 +124,113 @@ function showView(name) {
 function initLanding() {
   renderRecentAudits();
   showView('landing');
+  startLandingQueuePoll();
 }
+
+// ===================== LANDING LIVE QUEUE =====================
+
+let _landingQueueTimer = null;
+
+function startLandingQueuePoll() {
+  loadLandingQueue();
+  if (_landingQueueTimer) clearInterval(_landingQueueTimer);
+  _landingQueueTimer = setInterval(loadLandingQueue, 5000);
+}
+
+function stopLandingQueuePoll() {
+  if (_landingQueueTimer) { clearInterval(_landingQueueTimer); _landingQueueTimer = null; }
+}
+
+async function loadLandingQueue() {
+  const wrap    = document.getElementById('landing-queue-wrap');
+  const content = document.getElementById('landing-queue-content');
+  if (!wrap || !content) return;
+
+  try {
+    const res = await fetch('/api/queue');
+    if (!res.ok) return;
+    const { active, queued, runningAudits, maxConcurrent } = await res.json();
+
+    if (!active.length && !queued.length) {
+      wrap.style.display = 'none';
+      return;
+    }
+
+    wrap.style.display = '';
+
+    // Fetch progress for running audits
+    const progressMap = {};
+    await Promise.all(active.map(async a => {
+      try {
+        const r = await fetch(`/api/audit/${a.id}`);
+        if (r.ok) {
+          const d = await r.json();
+          const p = d.progress || {};
+          const audited = p.audited || 0;
+          const total   = p.total   || 0;
+          progressMap[a.id] = { audited, total, pct: total > 0 ? Math.round(audited / total * 100) : 0 };
+        }
+      } catch { /* ignore */ }
+    }));
+
+    const rows = [
+      ...active.map(a => ({ ...a, queueType: 'running' })),
+      ...queued.map(a => ({ ...a, queueType: 'queued' })),
+    ];
+
+    content.innerHTML = `
+      <div style="padding:8px 14px;font-size:12px;color:#64748b;border-bottom:1px solid #e2e8f0">
+        ${runningAudits} of ${maxConcurrent} slots in use
+      </div>
+      <table class="lq-table">
+        <thead><tr>
+          <th>URL</th><th>Status</th><th>Progress</th><th>Started</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(a => {
+            const prog = progressMap[a.id];
+            const progressCell = prog
+              ? `<div style="display:flex;align-items:center;gap:8px;min-width:130px">
+                   <div style="flex:1;height:5px;background:#dbeafe;border-radius:3px;overflow:hidden">
+                     <div style="width:${prog.pct}%;height:100%;background:#3b82f6;border-radius:3px;transition:width .4s"></div>
+                   </div>
+                   <span style="font-size:12px;font-weight:600;color:#1d4ed8;white-space:nowrap">${prog.pct}%</span>
+                   <span style="font-size:11px;color:#94a3b8;white-space:nowrap">${prog.audited}/${prog.total}</span>
+                 </div>`
+              : `<span style="font-size:12px;color:#cbd5e1">—</span>`;
+            return `<tr>
+              <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(a.url)}">${escapeHtml(a.url)}</td>
+              <td><span class="lq-badge ${a.queueType === 'running' ? 'running' : 'queued'}">
+                ${a.queueType === 'running'
+                  ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#3b82f6;animation:lq-pulse 1.5s infinite"></span> ${escapeHtml(a.status || 'running')}`
+                  : 'Queued'}
+              </span></td>
+              <td>${progressCell}</td>
+              <td style="color:#64748b;font-size:12px">${timeAgo(a.startTime)}</td>
+              <td><button class="lq-cancel" data-id="${escapeHtml(a.id)}">Cancel</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+
+    content.querySelectorAll('.lq-cancel').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Cancel this audit?')) return;
+        btn.disabled = true;
+        btn.textContent = 'Cancelling…';
+        try {
+          await fetch(`/api/audit/${btn.dataset.id}`, { method: 'DELETE' });
+          await loadLandingQueue();
+        } catch {
+          btn.disabled = false;
+          btn.textContent = 'Cancel';
+        }
+      });
+    });
+  } catch { /* silent */ }
+}
+
+document.getElementById('landing-queue-refresh-btn').addEventListener('click', loadLandingQueue);
 
 function renderRecentAudits() {
   const recent = getRecentAudits().filter(a => a.status === 'completed' || a.status === 'error');
