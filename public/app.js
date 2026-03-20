@@ -151,12 +151,12 @@ async function loadLandingQueue() {
     if (!res.ok) return;
     const { active, queued, runningAudits, maxConcurrent } = await res.json();
 
+    wrap.style.display = '';
+
     if (!active.length && !queued.length) {
-      wrap.style.display = 'none';
+      content.innerHTML = `<div style="padding:20px 14px;text-align:center;color:#94a3b8;font-size:13px">No active audits — queue is idle</div>`;
       return;
     }
-
-    wrap.style.display = '';
 
     // Fetch progress for running audits
     const progressMap = {};
