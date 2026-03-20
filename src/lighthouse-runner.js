@@ -152,6 +152,150 @@ const SEVERITY_ORDER = { critical: 0, serious: 1, moderate: 2, minor: 3 };
 const AXE_RULE_IDS = Object.keys(AXE_WCAG_MAPPING);
 const AXE_TIMEOUT_MS = 120_000;
 
+// ── WCAG 2.2 axe rule — only run when wcag22 option is enabled ────────────────
+// axe-core 4.8+ includes target-size; the other WCAG 2.2 criteria are checked
+// via custom Puppeteer logic in runWcag22Audit() below.
+const AXE_WCAG22_MAPPING = {
+  'target-size': { wcag: '2.5.8', level: 'AA', severity: 'serious' },
+};
+const AXE_WCAG22_RULE_IDS = Object.keys(AXE_WCAG22_MAPPING);
+
+// Custom Puppeteer-based checks for the five WCAG 2.2 criteria that axe-core
+// does not cover.  Returns an array of issue objects (same shape as axe issues).
+async function runWcag22Audit(url, browser) {
+  const page = await browser.newPage();
+  try {
+    await page.setDefaultNavigationTimeout(60_000);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await new Promise(r => setTimeout(r, 500));
+
+    const raw = await page.evaluate(() => {
+      const issues = [];
+
+      // ── 2.4.11 Focus Not Obscured ─────────────────────────────────────────
+      // Find fixed/sticky elements at the top of the viewport and collect any
+      // focusable elements whose top edge sits beneath them.
+      const stickyEls = Array.from(document.querySelectorAll('*')).filter(el => {
+        const cs = window.getComputedStyle(el);
+        if (cs.position !== 'fixed' && cs.position !== 'sticky') return false;
+        const r = el.getBoundingClientRect();
+        return r.height > 0 && r.top < 10 && r.width > window.innerWidth * 0.4;
+      });
+      const topObstacleHeight = stickyEls.reduce(
+        (max, el) => Math.max(max, el.getBoundingClientRect().bottom), 0
+      );
+      if (topObstacleHeight > 50) {
+        const focusable = Array.from(document.querySelectorAll(
+          'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+        ));
+        const obscured = focusable.filter(el => {
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 && r.top < topObstacleHeight && r.bottom > 0;
+        });
+        if (obscured.length > 0) {
+          issues.push({
+            id: 'wcag22-focus-not-obscured', wcag: '2.4.11', wcagLevel: 'AA', severity: 'serious',
+            title: 'Keyboard focus may be fully obscured by a sticky/fixed header',
+            description: 'WCAG 2.4.11 requires that focusable components are not entirely hidden by author-created content.',
+            count: obscured.length,
+            elements: obscured.slice(0, 5).map(el => ({
+              snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
+              explanation: `May be hidden behind sticky header (${Math.round(topObstacleHeight)}px)`,
+            })),
+          });
+        }
+      }
+
+      // ── 2.5.7 Dragging Movements ──────────────────────────────────────────
+      const draggables = Array.from(document.querySelectorAll(
+        '[draggable="true"],[data-drag-handle],[class*="sortable-handle"],[class*="drag-handle"]'
+      )).filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+      if (draggables.length > 0) {
+        issues.push({
+          id: 'wcag22-dragging-movement', wcag: '2.5.7', wcagLevel: 'AA', severity: 'moderate',
+          title: 'Draggable elements detected — ensure a single-pointer alternative exists',
+          description: 'WCAG 2.5.7 requires that any functionality using a dragging movement can also be operated with a single pointer without dragging.',
+          count: draggables.length,
+          elements: draggables.slice(0, 5).map(el => ({
+            snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
+            explanation: 'Verify that this element can be operated without dragging (e.g. up/down buttons or click-to-select).',
+          })),
+        });
+      }
+
+      // ── 3.2.6 Consistent Help ─────────────────────────────────────────────
+      // Detect the presence of help mechanisms and flag for cross-page review.
+      const HELP_PATTERNS = [
+        '[href*="contact"],[href*="support"],[href*="help"],[href*="faq"],[href*="feedback"]',
+        '[aria-label*="chat" i],[aria-label*="help" i],[title*="live chat" i]',
+        '[class*="live-chat"],[class*="help-button"],[class*="chat-widget"],[id*="chat-button"]',
+      ].join(',');
+      const helpEls = Array.from(document.querySelectorAll(HELP_PATTERNS))
+        .filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+      if (helpEls.length > 0) {
+        issues.push({
+          id: 'wcag22-consistent-help', wcag: '3.2.6', wcagLevel: 'A', severity: 'minor',
+          title: 'Help mechanism detected — verify it appears in a consistent location across all pages',
+          description: 'WCAG 3.2.6 requires that help mechanisms such as contact information or live chat appear in the same relative order on every page.',
+          count: helpEls.length,
+          elements: helpEls.slice(0, 3).map(el => ({
+            snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
+            explanation: 'Check that this help mechanism is in the same relative location on every page of the site.',
+          })),
+        });
+      }
+
+      // ── 3.3.7 Redundant Entry ─────────────────────────────────────────────
+      // Detect multi-step form patterns.
+      const stepEls = Array.from(document.querySelectorAll(
+        '[class*="step-"],[class*="wizard"],[class*="multi-step"],[data-step],[aria-label*="step" i],[class*="progress-step"]'
+      )).filter(el => { const r = el.getBoundingClientRect(); return r.width > 0; });
+      if (stepEls.length > 0) {
+        issues.push({
+          id: 'wcag22-redundant-entry', wcag: '3.3.7', wcagLevel: 'A', severity: 'moderate',
+          title: 'Multi-step form detected — verify users are not required to re-enter previously provided information',
+          description: 'WCAG 3.3.7 requires that information previously entered by the user is auto-populated or available for selection in subsequent steps.',
+          count: stepEls.length,
+          elements: stepEls.slice(0, 3).map(el => ({
+            snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
+            explanation: 'Ensure this step does not ask the user to re-enter information already submitted in a prior step.',
+          })),
+        });
+      }
+
+      // ── 3.3.8 Accessible Authentication ──────────────────────────────────
+      // Detect CAPTCHA elements on pages that appear to be auth flows.
+      const captchaEls = Array.from(document.querySelectorAll(
+        '[class*="captcha" i],[id*="captcha" i],iframe[src*="captcha"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[class*="g-recaptcha"],[class*="h-captcha"],[data-widget-type="CHECKBOX"]'
+      ));
+      const hasAuthForm = !!document.querySelector(
+        'input[type="password"],input[name*="login" i],input[name*="email" i][form],form input[autocomplete="current-password"]'
+      );
+      if (captchaEls.length > 0 && hasAuthForm) {
+        issues.push({
+          id: 'wcag22-accessible-auth', wcag: '3.3.8', wcagLevel: 'AA', severity: 'serious',
+          title: 'Authentication form contains a CAPTCHA that may require a cognitive function test',
+          description: 'WCAG 3.3.8 prohibits cognitive function tests (such as image CAPTCHAs) as the only authentication method unless an alternative is provided.',
+          count: captchaEls.length,
+          elements: captchaEls.slice(0, 3).map(el => ({
+            snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
+            explanation: 'Ensure a CAPTCHA-free login method (e.g. magic link, passkey, or image + audio alternative) is also available.',
+          })),
+        });
+      }
+
+      return issues;
+    });
+
+    return raw;
+  } finally {
+    await Promise.race([
+      page.close().catch(() => {}),
+      new Promise(r => setTimeout(r, 5_000)),
+    ]);
+  }
+}
+
 // Runs axe-core on the given URL using an existing Puppeteer browser instance.
 // Also extracts interactive element labels for WCAG 3.2.4 cross-page analysis.
 // Returns { issues, interactiveLabels }.
@@ -398,7 +542,7 @@ export async function launchBrowser() {
 // can't freeze the entire audit indefinitely.  5 minutes >> maxWaitForLoad (2 min).
 const LIGHTHOUSE_PAGE_TIMEOUT_MS = 7 * 60 * 1000;
 
-export async function runLighthouseAudit(url, browser) {
+export async function runLighthouseAudit(url, browser, opts = {}) {
   const port = parseInt(new URL(browser.wsEndpoint()).port);
 
   let result;
@@ -527,15 +671,66 @@ export async function runLighthouseAudit(url, browser) {
     console.warn(`[ibm] Skipped for ${url}: ${err.message}`);
   }
 
-  // Merge and sort — axe IDs use 'axe-' prefix, IBM IDs use 'ibm-' prefix
-  const allIssues = [...issues, ...axeIssues, ...ibmIssues];
+  // Optionally run WCAG 2.2 checks (axe target-size + custom Puppeteer heuristics)
+  let wcag22Issues = [];
+  if (opts.wcag22) {
+    // axe target-size rule (2.5.8)
+    try {
+      const page22 = await browser.newPage();
+      try {
+        await page22.setDefaultNavigationTimeout(60_000);
+        await page22.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+        await page22.evaluate(axeSource);
+        const r22 = await page22.evaluate(async (ruleIds) => {
+          return await window.axe.run(document, {
+            runOnly: { type: 'rule', values: ruleIds },
+            resultTypes: ['violations'],
+          });
+        }, AXE_WCAG22_RULE_IDS);
+        for (const v of (r22?.violations || [])) {
+          const info = AXE_WCAG22_MAPPING[v.id];
+          if (!info) continue;
+          wcag22Issues.push({
+            id: `axe22-${v.id}`,
+            title: v.help,
+            description: v.description || '',
+            severity: info.severity,
+            wcag: info.wcag,
+            wcagLevel: info.level,
+            score: 0,
+            displayValue: `${v.nodes.length} element${v.nodes.length !== 1 ? 's' : ''}`,
+            elements: v.nodes.slice(0, 8).map(n => ({
+              snippet: n.html || '', selector: (n.target || []).join(', '),
+              label: '', explanation: n.failureSummary || '',
+            })),
+            count: v.nodes.length,
+          });
+        }
+      } finally {
+        await page22.close().catch(() => {});
+      }
+    } catch (err) {
+      console.warn(`[wcag22-axe] Skipped for ${url}: ${err.message}`);
+    }
+
+    // Custom Puppeteer checks for 2.4.11 / 2.5.7 / 3.2.6 / 3.3.7 / 3.3.8
+    try {
+      const custom22 = await runWcag22Audit(url, browser);
+      wcag22Issues.push(...custom22);
+    } catch (err) {
+      console.warn(`[wcag22-custom] Skipped for ${url}: ${err.message}`);
+    }
+  }
+
+  // Merge and sort — axe IDs use 'axe-' prefix, IBM IDs use 'ibm-' prefix, WCAG 2.2 use 'wcag22-'/'axe22-'
+  const allIssues = [...issues, ...axeIssues, ...ibmIssues, ...wcag22Issues];
   allIssues.sort((a, b) =>
     (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2)
   );
 
   // Adjust Lighthouse score downward for additional issues found by axe/IBM.
   // Lighthouse already reflects its own findings, so only extra issues penalise.
-  const extraIssues = [...axeIssues, ...ibmIssues];
+  const extraIssues = [...axeIssues, ...ibmIssues, ...wcag22Issues];
   const PENALTY   = { critical: 5, serious: 3, moderate: 1, minor: 0.5 };
   const PENALTY_CAP = { critical: 20, serious: 12, moderate: 6, minor: 3 };
   let totalPenalty = 0;

@@ -71,14 +71,14 @@ async function checkUrlStatus(url) {
 
 // Re-audit a single URL and return the updated page result.
 // Used by the /rescan endpoint to retry a previously errored page.
-export async function rescanPage(url) {
+export async function rescanPage(url, opts = {}) {
   const browser = await launchBrowser();
   try {
     let pageResult;
     let lastError;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        pageResult = await runLighthouseAudit(url, browser);
+        pageResult = await runLighthouseAudit(url, browser, opts);
         lastError = null;
         break;
       } catch (error) {
@@ -248,7 +248,7 @@ async function _runAudit(session, onUpdate) {
         let lastError;
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
           try {
-            pageResult = await runLighthouseAudit(pageUrl, browsers[workerIdx]);
+            pageResult = await runLighthouseAudit(pageUrl, browsers[workerIdx], { wcag22: !!session.wcag22 });
             lastError = null;
             break;
           } catch (error) {

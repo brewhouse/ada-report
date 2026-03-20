@@ -319,17 +319,18 @@ document.getElementById('audit-form').addEventListener('submit', async (e) => {
   btn.textContent = 'Starting...';
 
   try {
+    const wcag22 = document.getElementById('wcag22-checkbox').checked;
     let body;
     if (auditMode === 'url-list') {
       const urlList = parseUrlList();
       if (urlList.length === 0) throw new Error('Please enter at least one valid URL (must start with http:// or https://).');
-      body = { urlList };
+      body = { urlList, wcag22 };
     } else {
       const url = document.getElementById('url-input').value.trim();
       if (!url) throw new Error('Please enter a website URL.');
       const maxPages = parseInt(document.getElementById('max-pages-input').value);
       const excludeSitemaps = parseExcludeSitemaps();
-      body = { url, maxPages, ...(excludeSitemaps.length > 0 && { excludeSitemaps }) };
+      body = { url, maxPages, wcag22, ...(excludeSitemaps.length > 0 && { excludeSitemaps }) };
     }
 
     const res = await fetch('/api/audit', {

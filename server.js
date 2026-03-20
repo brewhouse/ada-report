@@ -309,7 +309,7 @@ async function getSessionForReport(id) {
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/audit', (req, res) => {
-  const { url, maxPages = 50, urlList, excludeSitemaps } = req.body;
+  const { url, maxPages = 50, urlList, excludeSitemaps, wcag22 = false } = req.body;
 
   if (urlList) {
     if (!Array.isArray(urlList) || urlList.length === 0) {
@@ -355,6 +355,7 @@ app.post('/api/audit', (req, res) => {
     progress:        { crawled: 0, total: 0, audited: 0 },
     summary:         null,
     error:           null,
+    wcag22:          !!wcag22,
     queuePosition:   auditQueue.length + 1,
   };
 
@@ -492,7 +493,7 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
   broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
 
   try {
-    const result = await rescanPage(url);
+    const result = await rescanPage(url, { wcag22: !!session.wcag22 });
 
     // Remove old page from DB then save the fresh result.
     await deletePageByUrl(session.id, url).catch(err =>
