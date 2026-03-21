@@ -268,7 +268,13 @@ async function processAuditQueue() {
           }
         } else {
           Object.assign(session, update);
-          flushBroadcast();
+          // Do NOT broadcast when status becomes 'completed' here — at this
+          // point pendingPageSaves haven't settled yet, so getFullSession
+          // would return pages with missing issues.  The definitive
+          // 'completed' broadcast happens below after all saves finish.
+          if (update.status !== 'completed') {
+            flushBroadcast();
+          }
         }
       }),
       timeout,

@@ -437,14 +437,14 @@ function connectWebSocket(auditId) {
     if (data.status === 'completed') {
       saveRecentAudit(auditId, data.url, data.summary?.averageScore ?? null, 'completed');
       if (!wasCompleted) {
-        // First time the audit reaches 'completed' — re-fetch from the API so
-        // the right panel gets full issue data (in-memory WS data has issues
-        // stripped from RAM after each page is saved to DB).
-        loadExistingAudit(auditId);
+        // First 'completed' broadcast — render directly from the broadcast
+        // data (which now comes from DB with full issues) instead of calling
+        // loadExistingAudit, which is async and can race with subsequent
+        // broadcasts, causing issues to disappear.
+        renderResults(data);
       } else {
-        // Subsequent full-session broadcast (e.g. after all DB saves complete)
-        // — refresh page list and, if a page is open, update the right panel
-        // with the now-complete issue data.
+        // Subsequent full-session broadcast (e.g. after auto-rescan)
+        // — refresh page list and, if a page is open, update the right panel.
         renderPagesList(data.pages);
         if (selectedPageUrl) {
           const sel = data.pages.find(p => p.url === selectedPageUrl);
