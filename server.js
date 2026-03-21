@@ -145,32 +145,29 @@ async function saveSessionToDb(session) {
   }
 }
 
-// Write one completed page to DB, then strip its issues array from memory so
-// that concurrent large audits do not accumulate unbounded issue data in RAM.
+// Write one completed page to DB.
 // Returns the promise so callers can await all pending saves before querying DB.
-function savePageAndFreeMemory(session, page, pendingSaves) {
+// NOTE: we intentionally keep page.issues in memory — the RAM cost (~20 MB for
+// a 100-page audit) is small, and nulling them caused cascading bugs: broken
+// summaries, empty reports, issues disappearing from the UI.  The in-memory
+// issues serve as the authoritative source for WS broadcasts and the summary
+// computed inside startAudit; DB is a persistence layer, not the primary store.
+function savePageToDb(session, page, pendingSaves) {
   const p = savePage(session.id, page)
-    .then(() => {
-      // Free the heavy issues array — report generation always queries the DB.
-      page.issues = null;
-    })
     .catch(err => console.warn('[db] savePage error:', err.message));
   if (pendingSaves) pendingSaves.push(p);
   return p;
 }
 
 // Load a session from memory, or fall back to DB if not present.
-// Caches a lightweight (no issues in RAM) copy in auditSessions.
 async function getOrLoadSession(id) {
   const mem = auditSessions.get(id);
   if (mem) return mem;
   try {
     const db = await getFullSession(id);
     if (db) {
-      // Store lightweight copy so future in-memory checks work.
-      const lightweight = { ...db, pages: db.pages.map(p => ({ ...p, issues: null })) };
-      auditSessions.set(id, lightweight);
-      return lightweight;
+      auditSessions.set(id, db);
+      return db;
     }
   } catch (err) {
     console.warn('[db] getOrLoadSession error:', err.message);
@@ -248,13 +245,10 @@ async function processAuditQueue() {
             const { completedPage, ...rest } = update;
             Object.assign(session, rest);
 
-            // Broadcast immediately so the right panel receives full issue data
-            // BEFORE the async DB save nulls page.issues for memory savings.
             flushBroadcast();
 
-            // Save to DB then free the heavy issues array from RAM.
-            // Track the promise so we can await all saves before proceeding.
-            savePageAndFreeMemory(session, page, pendingPageSaves);
+            // Persist to DB (issues stay in RAM for broadcasts + summary).
+            savePageToDb(session, page, pendingPageSaves);
           } else {
             const { completedPage, ...rest } = update;
             Object.assign(session, rest);
@@ -268,47 +262,18 @@ async function processAuditQueue() {
           }
         } else {
           Object.assign(session, update);
-          if (update.status === 'completed') {
-            // Kill any lingering debounced timer so it doesn't fire with
-            // stale data while we await pendingPageSaves below.
-            if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
-            // Do NOT broadcast here — pendingPageSaves haven't settled yet.
-            // The definitive 'completed' broadcast happens below after all saves.
-          } else {
-            flushBroadcast();
-          }
+          // Issues are kept in memory, so the broadcast always has full data.
+          flushBroadcast();
         }
       }),
       timeout,
     ]);
 
-    // Wait for all page saves to finish before querying DB or broadcasting final state.
+    // Wait for all page saves to finish before persisting the session summary.
     await Promise.allSettled(pendingPageSaves);
 
     if (!session._cancelledExternally) {
-      // The summary computed inside startAudit is unreliable because
-      // savePageAndFreeMemory nulls page.issues for RAM savings BEFORE
-      // startAudit computes its summary (flatMap over p.issues).
-      // Recompute from the authoritative DB data instead.
-      try {
-        const dbSummary = await recomputeSummary(session.id);
-        session.summary = dbSummary;
-      } catch (err) {
-        console.warn('[db] recomputeSummary error, using startAudit summary:', err.message);
-      }
-
       await saveSessionToDb(session);
-
-      // Now broadcast the definitive session from DB — with full page issues
-      // and the correct summary — so the client renders everything accurately.
-      try {
-        const full = await getFullSession(session.id);
-        if (full) {
-          broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(full) });
-        }
-      } catch (err) {
-        console.warn('[db] post-save full broadcast error:', err.message);
-      }
 
       // Fire-and-forget background auto-rescan for any error pages.
       // Delayed so the client has time to finish rendering the completed
@@ -386,12 +351,11 @@ async function autoRescanErrorPages(sessionId, wcag22) {
           await savePage(sessionId, result).catch(err =>
             console.warn('[db] auto-rescan savePage error:', err.message)
           );
-          // Update the in-memory session page (strip issues to save RAM).
+          // Update the in-memory session page.
           if (session?.pages) {
             const idx = session.pages.findIndex(p => p.url === ep.url);
-            if (idx >= 0) session.pages[idx] = { ...result, issues: null };
+            if (idx >= 0) session.pages[idx] = result;
           }
-          // Broadcast result WITH issues so the right panel updates immediately.
           broadcastToAudit(sessionId, { type: 'page-update', data: result });
         } catch (err) {
           console.warn(`[auto-rescan] pass ${pass} failed for ${ep.url}: ${err.message}`);
@@ -401,7 +365,7 @@ async function autoRescanErrorPages(sessionId, wcag22) {
           };
           if (session?.pages) {
             const idx = session.pages.findIndex(p => p.url === ep.url);
-            if (idx >= 0) session.pages[idx] = { ...errPage, issues: null };
+            if (idx >= 0) session.pages[idx] = errPage;
           }
           broadcastToAudit(sessionId, { type: 'page-update', data: errPage });
         }
@@ -645,7 +609,7 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
   if (session.pages.length === 0) {
     try {
       const full = await getFullSession(req.params.id);
-      if (full) session.pages = full.pages.map(p => ({ ...p, issues: null }));
+      if (full) session.pages = full.pages;
     } catch (err) {
       console.warn('[db] rescan: could not load pages from DB:', err.message);
     }
@@ -668,12 +632,11 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
       console.warn('[db] savePage (rescan) error:', err.message)
     );
 
-    // Update in-memory page (strip issues — they're in DB).
-    const lightweight = { ...result, issues: null };
+    // Update in-memory page with full result (including issues).
     if (existingIdx >= 0) {
-      session.pages[existingIdx] = lightweight;
+      session.pages[existingIdx] = result;
     } else {
-      session.pages.push(lightweight);
+      session.pages.push(result);
     }
 
     // Recompute summary from DB so we get accurate totals across all pages.
@@ -683,14 +646,7 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
     // Persist updated summary.
     await upsertSession(session).catch(err => console.warn('[db] upsertSession (rescan) error:', err.message));
 
-    // Broadcast the full session (with issues loaded from DB) so the right panel
-    // can display results immediately without the client needing to re-fetch.
-    try {
-      const fullForBroadcast = await getFullSession(session.id);
-      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(fullForBroadcast || session) });
-    } catch {
-      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-    }
+    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
 
     res.json({ success: true, page: result });
   } catch (err) {
@@ -698,7 +654,7 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
     if (existingIdx >= 0) {
       session.pages[existingIdx] = {
         url, status: 'error', error: err.message,
-        score: null, issues: null, issueCount: 0,
+        score: null, issues: [], issueCount: 0,
         timestamp: new Date().toISOString(),
       };
       broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
