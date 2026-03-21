@@ -287,12 +287,13 @@ async function processAuditQueue() {
 
         console.log(`[audit] Auto-rescan pass ${pass}/${MAX_AUTO_RETRY_PASSES}: ${errorPages.length} page(s) — ${session.id}`);
 
-        // Mark them as rescanning and broadcast.
+        // Mark pages as rescanning in-memory (no broadcast yet — broadcasting
+        // with status='completed' mid-rescan triggers loadExistingAudit on the
+        // client which races against the DB writes and wipes visible issues).
         for (const ep of errorPages) {
           const idx = session.pages.findIndex(p => p.url === ep.url);
           if (idx >= 0) session.pages[idx] = { ...session.pages[idx], status: 'rescanning' };
         }
-        flushBroadcast();
 
         for (const ep of errorPages) {
           if (session._cancelledExternally) break;
@@ -315,7 +316,18 @@ async function processAuditQueue() {
             }
           }
         }
-        flushBroadcast();
+
+        // Broadcast the full session loaded from DB so the client receives
+        // complete issue data (not the null-stripped in-memory copy).
+        try {
+          const fullForBroadcast = await getFullSession(session.id);
+          broadcastToAudit(session.id, {
+            type: 'update',
+            data: sanitizeSession(fullForBroadcast || session),
+          });
+        } catch {
+          flushBroadcast();
+        }
       }
 
       // Recompute summary to reflect any auto-rescan changes.

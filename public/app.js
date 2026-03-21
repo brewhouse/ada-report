@@ -400,13 +400,24 @@ function connectWebSocket(auditId) {
   ws.onmessage = (event) => {
     const { data } = JSON.parse(event.data);
     if (!data) return;
+
+    const wasCompleted = currentSession?.status === 'completed';
     currentSession = data;
 
     if (data.status === 'completed') {
       saveRecentAudit(auditId, data.url, data.summary?.averageScore ?? null, 'completed');
-      // Re-fetch from API: the in-memory session has page.issues nulled (freed for
-      // memory savings after DB save). The API now loads full issues from DB.
-      loadExistingAudit(auditId);
+      if (!wasCompleted) {
+        // First time the audit reaches 'completed' — re-fetch from the API so
+        // the right panel gets full issue data (in-memory WS data has issues
+        // stripped from RAM after each page is saved to DB).
+        loadExistingAudit(auditId);
+      } else {
+        // Subsequent 'completed' broadcast from an auto-rescan pass.
+        // The server already loaded full issues from DB before broadcasting,
+        // so data.pages has complete issue arrays — just refresh the page list
+        // without resetting selectedPageUrl or wiping the right panel.
+        renderPagesList(data.pages);
+      }
     } else if (data.status === 'error') {
       saveRecentAudit(auditId, data.url, null, 'error');
       exitScanningMode();
