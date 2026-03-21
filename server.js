@@ -88,6 +88,42 @@ app.get('/api/db-status', async (_req, res) => {
   }
 });
 
+// Diagnostic endpoint — checks DB state for a session
+app.get('/api/audit/:id/debug', async (req, res) => {
+  try {
+    const full = await getFullSession(req.params.id);
+    if (!full) return res.status(404).json({ error: 'Session not found in DB' });
+
+    const pagesSummary = full.pages.map(p => ({
+      url: p.url.substring(0, 80),
+      status: p.status,
+      score: p.score,
+      issueCount: p.issueCount,
+      issuesInDb: (p.issues || []).length,
+      match: p.issueCount === (p.issues || []).length,
+    }));
+
+    const totalIssueCount = full.pages.reduce((s, p) => s + (p.issueCount || 0), 0);
+    const totalIssuesInDb = full.pages.reduce((s, p) => s + (p.issues || []).length, 0);
+
+    res.json({
+      sessionId: full.id,
+      status: full.status,
+      summary: full.summary,
+      totalPages: full.pages.length,
+      totalIssueCount,
+      totalIssuesInDb,
+      issuesMissing: totalIssueCount - totalIssuesInDb,
+      pages: pagesSummary,
+      inMemory: auditSessions.has(req.params.id),
+      inMemoryPageCount: auditSessions.get(req.params.id)?.pages?.length ?? 0,
+      inMemoryHasIssues: (auditSessions.get(req.params.id)?.pages || []).some(p => p.issues?.length > 0),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── WebSocket ──────────────────────────────────────────────────────────────────
 wss.on('connection', (ws, req) => {
   const url     = new URL(req.url, 'http://localhost');
