@@ -442,8 +442,14 @@ function connectWebSocket(auditId) {
         // stripped from RAM after each page is saved to DB).
         loadExistingAudit(auditId);
       } else {
-        // Subsequent full-session broadcast — refresh page list only.
+        // Subsequent full-session broadcast (e.g. after all DB saves complete)
+        // — refresh page list and, if a page is open, update the right panel
+        // with the now-complete issue data.
         renderPagesList(data.pages);
+        if (selectedPageUrl) {
+          const sel = data.pages.find(p => p.url === selectedPageUrl);
+          if (sel) renderIssues(sel.issues || []);
+        }
       }
     } else if (data.status === 'error') {
       saveRecentAudit(auditId, data.url, null, 'error');

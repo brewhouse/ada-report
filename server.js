@@ -280,6 +280,20 @@ async function processAuditQueue() {
     if (!session._cancelledExternally) {
       await saveSessionToDb(session);
 
+      // The 'completed' broadcast from startAudit fires BEFORE pendingPageSaves
+      // settle, so the client's initial loadExistingAudit / getFullSession call
+      // may return pages with incomplete issue data.  Now that all saves are
+      // done, broadcast the definitive session from DB so the client ends up
+      // with every page's issues fully populated.
+      try {
+        const full = await getFullSession(session.id);
+        if (full) {
+          broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(full) });
+        }
+      } catch (err) {
+        console.warn('[db] post-save full broadcast error:', err.message);
+      }
+
       // Fire-and-forget background auto-rescan for any error pages.
       // Delayed so the client has time to finish rendering the completed
       // results view before per-page update messages start arriving.
