@@ -110,12 +110,21 @@ export async function initDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    // Backfill columns added after initial deploy — safe to run on every startup
-    for (const col of [
-      "ALTER TABLE audit_issues ADD COLUMN IF NOT EXISTS issue_id   VARCHAR(150) NULL",
-      "ALTER TABLE audit_issues ADD COLUMN IF NOT EXISTS wcag_level VARCHAR(10)  NULL",
-    ]) {
-      await conn.execute(col).catch(() => {}); // ignore if already exists / older MySQL
+    // Backfill columns added after initial deploy.
+    // Check if columns exist first (IF NOT EXISTS not supported on all MySQL versions).
+    const [cols] = await conn.execute(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_issues'`
+    );
+    const existingCols = new Set(cols.map(c => c.COLUMN_NAME));
+
+    if (!existingCols.has('issue_id')) {
+      await conn.execute("ALTER TABLE audit_issues ADD COLUMN issue_id VARCHAR(150) NULL");
+      console.log('[db] Added missing column: audit_issues.issue_id');
+    }
+    if (!existingCols.has('wcag_level')) {
+      await conn.execute("ALTER TABLE audit_issues ADD COLUMN wcag_level VARCHAR(10) NULL");
+      console.log('[db] Added missing column: audit_issues.wcag_level');
     }
 
     // schedules — replaces data/schedules.json
