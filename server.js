@@ -147,13 +147,35 @@ async function saveSessionToDb(session) {
 
 // Write one completed page to DB, then strip its issues array from memory so
 // that concurrent large audits do not accumulate unbounded issue data in RAM.
-function savePageAndFreeMemory(session, page) {
-  savePage(session.id, page)
+// Returns the promise so callers can await all pending saves before querying DB.
+function savePageAndFreeMemory(session, page, pendingSaves) {
+  const p = savePage(session.id, page)
     .then(() => {
       // Free the heavy issues array — report generation always queries the DB.
       page.issues = null;
     })
     .catch(err => console.warn('[db] savePage error:', err.message));
+  if (pendingSaves) pendingSaves.push(p);
+  return p;
+}
+
+// Load a session from memory, or fall back to DB if not present.
+// Caches a lightweight (no issues in RAM) copy in auditSessions.
+async function getOrLoadSession(id) {
+  const mem = auditSessions.get(id);
+  if (mem) return mem;
+  try {
+    const db = await getFullSession(id);
+    if (db) {
+      // Store lightweight copy so future in-memory checks work.
+      const lightweight = { ...db, pages: db.pages.map(p => ({ ...p, issues: null })) };
+      auditSessions.set(id, lightweight);
+      return lightweight;
+    }
+  } catch (err) {
+    console.warn('[db] getOrLoadSession error:', err.message);
+  }
+  return null;
 }
 
 // Load session metadata from DB on startup.
@@ -185,7 +207,7 @@ function cleanOldSessions() {
   // Old session data stays in MySQL; DB pruning happens on a daily schedule.
 }
 
-const MAX_AUDIT_DURATION_MS = 480 * 60 * 1000;
+const MAX_AUDIT_DURATION_MS = 1440 * 60 * 1000; // 24 hours
 
 async function processAuditQueue() {
   if (runningAudits >= MAX_CONCURRENT_AUDITS || auditQueue.length === 0) return;
@@ -194,10 +216,15 @@ async function processAuditQueue() {
 
   session._cancelledExternally = false;
 
+  // Track all in-flight savePage() promises so we can await them before
+  // querying the DB for reports/summary (avoids a race where getFullSession
+  // runs before all pages have been written).
+  const pendingPageSaves = [];
+
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(
-      () => reject(new Error('Audit timed out after 480 minutes')),
+      () => reject(new Error('Audit timed out after 24 hours')),
       MAX_AUDIT_DURATION_MS
     );
   });
@@ -226,7 +253,8 @@ async function processAuditQueue() {
             flushBroadcast();
 
             // Save to DB then free the heavy issues array from RAM.
-            savePageAndFreeMemory(session, page);
+            // Track the promise so we can await all saves before proceeding.
+            savePageAndFreeMemory(session, page, pendingPageSaves);
           } else {
             const { completedPage, ...rest } = update;
             Object.assign(session, rest);
@@ -246,9 +274,60 @@ async function processAuditQueue() {
       timeout,
     ]);
 
-    if (!session._cancelledExternally) await saveSessionToDb(session);
+    // Wait for all page saves to finish before querying DB or broadcasting final state.
+    await Promise.allSettled(pendingPageSaves);
+
+    if (!session._cancelledExternally) {
+      // Auto-rescan any pages that errored due to timeout/crash (up to 2 passes).
+      const MAX_AUTO_RETRY_PASSES = 2;
+      for (let pass = 1; pass <= MAX_AUTO_RETRY_PASSES; pass++) {
+        if (session._cancelledExternally) break;
+        const errorPages = session.pages.filter(p => p.status === 'error');
+        if (errorPages.length === 0) break;
+
+        console.log(`[audit] Auto-rescan pass ${pass}/${MAX_AUTO_RETRY_PASSES}: ${errorPages.length} page(s) — ${session.id}`);
+
+        // Mark them as rescanning and broadcast.
+        for (const ep of errorPages) {
+          const idx = session.pages.findIndex(p => p.url === ep.url);
+          if (idx >= 0) session.pages[idx] = { ...session.pages[idx], status: 'rescanning' };
+        }
+        flushBroadcast();
+
+        for (const ep of errorPages) {
+          if (session._cancelledExternally) break;
+          const idx = session.pages.findIndex(p => p.url === ep.url);
+          try {
+            const result = await rescanPage(ep.url, { wcag22: !!session.wcag22 });
+            await deletePageByUrl(session.id, ep.url).catch(() => {});
+            await savePage(session.id, result).catch(err =>
+              console.warn('[db] auto-rescan savePage error:', err.message)
+            );
+            if (idx >= 0) session.pages[idx] = { ...result, issues: null };
+          } catch (err) {
+            console.warn(`[audit] Auto-rescan pass ${pass} failed for ${ep.url}: ${err.message}`);
+            if (idx >= 0) {
+              session.pages[idx] = {
+                url: ep.url, status: 'error', error: err.message,
+                score: null, issues: null, issueCount: 0,
+                timestamp: new Date().toISOString(),
+              };
+            }
+          }
+        }
+        flushBroadcast();
+      }
+
+      // Recompute summary to reflect any auto-rescan changes.
+      const newSummary = await recomputeSummary(session.id).catch(() => null);
+      if (newSummary) session.summary = newSummary;
+
+      await saveSessionToDb(session);
+    }
   } catch (error) {
     if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
+    // Ensure any in-flight saves complete even on error/timeout.
+    await Promise.allSettled(pendingPageSaves);
     if (!session._cancelledExternally) {
       session.status  = 'error';
       session.error   = error.message;
@@ -408,9 +487,9 @@ app.get('/api/audits', (_req, res) => {
 
 // Full developer report — fetches complete page+issue data from DB.
 app.get('/api/audit/:id/report', async (req, res) => {
-  const meta = auditSessions.get(req.params.id);
+  const meta = await getOrLoadSession(req.params.id);
   if (!meta) return res.status(404).json({ error: 'Audit not found' });
-  if (meta.status !== 'completed') {
+  if (meta.status !== 'completed' && meta.status !== 'error') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
@@ -433,9 +512,9 @@ app.get('/api/audit/:id/report', async (req, res) => {
 
 // VPAT report
 app.get('/api/audit/:id/report/vpat', async (req, res) => {
-  const meta = auditSessions.get(req.params.id);
+  const meta = await getOrLoadSession(req.params.id);
   if (!meta) return res.status(404).json({ error: 'Audit not found' });
-  if (meta.status !== 'completed') {
+  if (meta.status !== 'completed' && meta.status !== 'error') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
@@ -449,9 +528,9 @@ app.get('/api/audit/:id/report/vpat', async (req, res) => {
 
 // Summary report
 app.get('/api/audit/:id/report/summary', async (req, res) => {
-  const meta = auditSessions.get(req.params.id);
+  const meta = await getOrLoadSession(req.params.id);
   if (!meta) return res.status(404).json({ error: 'Audit not found' });
-  if (meta.status !== 'completed') {
+  if (meta.status !== 'completed' && meta.status !== 'error') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 
@@ -474,7 +553,7 @@ app.get('/api/audit/:id/report/summary', async (req, res) => {
 
 // Rescan a single page
 app.post('/api/audit/:id/rescan', async (req, res) => {
-  const session = auditSessions.get(req.params.id);
+  const session = await getOrLoadSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Audit not found' });
   if (session.status !== 'completed' && session.status !== 'error') {
     return res.status(400).json({ error: 'Audit must be completed before rescanning individual pages' });
@@ -484,6 +563,17 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'url is required' });
   try { new URL(url); } catch {
     return res.status(400).json({ error: 'Invalid URL format' });
+  }
+
+  // If session was restored from DB metadata (pages: []), load the full page list
+  // so in-memory stays consistent for future rescans and broadcasts.
+  if (session.pages.length === 0) {
+    try {
+      const full = await getFullSession(req.params.id);
+      if (full) session.pages = full.pages.map(p => ({ ...p, issues: null }));
+    } catch (err) {
+      console.warn('[db] rescan: could not load pages from DB:', err.message);
+    }
   }
 
   const existingIdx = session.pages.findIndex(p => p.url === url);
@@ -518,7 +608,15 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
     // Persist updated summary.
     await upsertSession(session).catch(err => console.warn('[db] upsertSession (rescan) error:', err.message));
 
-    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    // Broadcast the full session (with issues loaded from DB) so the right panel
+    // can display results immediately without the client needing to re-fetch.
+    try {
+      const fullForBroadcast = await getFullSession(session.id);
+      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(fullForBroadcast || session) });
+    } catch {
+      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    }
+
     res.json({ success: true, page: result });
   } catch (err) {
     console.error('[rescan] Error:', err.message);
@@ -536,9 +634,9 @@ app.post('/api/audit/:id/rescan', async (req, res) => {
 
 // Email report
 app.post('/api/audit/:id/email', async (req, res) => {
-  const meta = auditSessions.get(req.params.id);
+  const meta = await getOrLoadSession(req.params.id);
   if (!meta) return res.status(404).json({ error: 'Audit not found' });
-  if (meta.status !== 'completed') {
+  if (meta.status !== 'completed' && meta.status !== 'error') {
     return res.status(400).json({ error: 'Audit not yet completed' });
   }
 

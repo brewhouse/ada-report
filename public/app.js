@@ -740,8 +740,12 @@ async function rescanSinglePage(url) {
     const data = await res.json();
     if (!res.ok) {
       showToast(`Rescan failed: ${data.error || 'Unknown error'}`);
+    } else {
+      // Reload the full session from the API so the page list and issues panel
+      // reflect the updated results (the in-memory WS broadcast strips issues
+      // from RAM, so we always need a fresh fetch from the DB after a rescan).
+      await loadExistingAudit(currentAuditId);
     }
-    // UI updates automatically via WebSocket broadcast from the server
   } catch (err) {
     showToast(`Rescan error: ${err.message}`);
   }

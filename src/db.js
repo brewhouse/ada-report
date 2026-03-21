@@ -358,7 +358,7 @@ export async function getFullSession(sessionId) {
         title:       issue.title,
         description: issue.description,
         count:       issue.issue_count,
-        elements:    issue.elements ? JSON.parse(issue.elements) : [],
+        elements:    issue.elements ? (() => { try { return JSON.parse(issue.elements); } catch { return []; } })() : [],
       });
     }
   }
