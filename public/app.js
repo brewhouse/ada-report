@@ -398,7 +398,37 @@ function connectWebSocket(auditId) {
   ws = new WebSocket(`${proto}//${location.host}/?auditId=${auditId}`);
 
   ws.onmessage = (event) => {
-    const { data } = JSON.parse(event.data);
+    const msg = JSON.parse(event.data);
+
+    // ── Targeted per-page update from auto-rescan (no full re-render) ──
+    if (msg.type === 'page-update') {
+      const page = msg.data;
+      if (!page?.url || !currentSession) return;
+      const idx = currentSession.pages.findIndex(p => p.url === page.url);
+      if (idx >= 0) {
+        // Merge update; keep existing issues if the incoming page has none yet.
+        currentSession.pages[idx] = {
+          ...currentSession.pages[idx],
+          ...page,
+          issues: page.issues != null ? page.issues : currentSession.pages[idx].issues,
+        };
+      }
+      renderPagesList(currentSession.pages);
+      // If this page is open in the right panel and has new issues, refresh it.
+      if (selectedPageUrl === page.url && page.issues) {
+        renderIssues(page.issues);
+      }
+      return;
+    }
+
+    // ── Summary-only update after auto-rescan finishes ──
+    if (msg.type === 'summary-update') {
+      if (msg.data?.summary && currentSession) currentSession.summary = msg.data.summary;
+      return;
+    }
+
+    // ── Full session update (normal audit progress / completion) ──
+    const { data } = msg;
     if (!data) return;
 
     const wasCompleted = currentSession?.status === 'completed';
@@ -412,10 +442,7 @@ function connectWebSocket(auditId) {
         // stripped from RAM after each page is saved to DB).
         loadExistingAudit(auditId);
       } else {
-        // Subsequent 'completed' broadcast from an auto-rescan pass.
-        // The server already loaded full issues from DB before broadcasting,
-        // so data.pages has complete issue arrays — just refresh the page list
-        // without resetting selectedPageUrl or wiping the right panel.
+        // Subsequent full-session broadcast — refresh page list only.
         renderPagesList(data.pages);
       }
     } else if (data.status === 'error') {

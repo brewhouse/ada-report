@@ -278,63 +278,17 @@ async function processAuditQueue() {
     await Promise.allSettled(pendingPageSaves);
 
     if (!session._cancelledExternally) {
-      // Auto-rescan any pages that errored due to timeout/crash (up to 2 passes).
-      const MAX_AUTO_RETRY_PASSES = 2;
-      for (let pass = 1; pass <= MAX_AUTO_RETRY_PASSES; pass++) {
-        if (session._cancelledExternally) break;
-        const errorPages = session.pages.filter(p => p.status === 'error');
-        if (errorPages.length === 0) break;
-
-        console.log(`[audit] Auto-rescan pass ${pass}/${MAX_AUTO_RETRY_PASSES}: ${errorPages.length} page(s) — ${session.id}`);
-
-        // Mark pages as rescanning in-memory (no broadcast yet — broadcasting
-        // with status='completed' mid-rescan triggers loadExistingAudit on the
-        // client which races against the DB writes and wipes visible issues).
-        for (const ep of errorPages) {
-          const idx = session.pages.findIndex(p => p.url === ep.url);
-          if (idx >= 0) session.pages[idx] = { ...session.pages[idx], status: 'rescanning' };
-        }
-
-        for (const ep of errorPages) {
-          if (session._cancelledExternally) break;
-          const idx = session.pages.findIndex(p => p.url === ep.url);
-          try {
-            const result = await rescanPage(ep.url, { wcag22: !!session.wcag22 });
-            await deletePageByUrl(session.id, ep.url).catch(() => {});
-            await savePage(session.id, result).catch(err =>
-              console.warn('[db] auto-rescan savePage error:', err.message)
-            );
-            if (idx >= 0) session.pages[idx] = { ...result, issues: null };
-          } catch (err) {
-            console.warn(`[audit] Auto-rescan pass ${pass} failed for ${ep.url}: ${err.message}`);
-            if (idx >= 0) {
-              session.pages[idx] = {
-                url: ep.url, status: 'error', error: err.message,
-                score: null, issues: null, issueCount: 0,
-                timestamp: new Date().toISOString(),
-              };
-            }
-          }
-        }
-
-        // Broadcast the full session loaded from DB so the client receives
-        // complete issue data (not the null-stripped in-memory copy).
-        try {
-          const fullForBroadcast = await getFullSession(session.id);
-          broadcastToAudit(session.id, {
-            type: 'update',
-            data: sanitizeSession(fullForBroadcast || session),
-          });
-        } catch {
-          flushBroadcast();
-        }
-      }
-
-      // Recompute summary to reflect any auto-rescan changes.
-      const newSummary = await recomputeSummary(session.id).catch(() => null);
-      if (newSummary) session.summary = newSummary;
-
       await saveSessionToDb(session);
+
+      // Fire-and-forget background auto-rescan for any error pages.
+      // Delayed so the client has time to finish rendering the completed
+      // results view before per-page update messages start arriving.
+      const errorCount = session.pages.filter(p => p.status === 'error').length;
+      if (errorCount > 0) {
+        autoRescanErrorPages(session.id, !!session.wcag22).catch(err =>
+          console.warn('[auto-rescan] Unexpected error:', err.message)
+        );
+      }
     }
   } catch (error) {
     if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
@@ -354,6 +308,85 @@ async function processAuditQueue() {
       runningAudits--;
       processAuditQueue();
     }
+  }
+}
+
+// ── Background auto-rescan ─────────────────────────────────────────────────────
+// Runs after an audit completes to retry pages that errored (timeout/crash).
+// Uses 'page-update' WS messages so the client updates individual rows in the
+// page list without re-rendering the entire results view.
+async function autoRescanErrorPages(sessionId, wcag22) {
+  // Give the client ~2 s to finish rendering the completed results before we
+  // start sending page-update messages (avoids racing with loadExistingAudit).
+  await new Promise(r => setTimeout(r, 2000));
+
+  const session = auditSessions.get(sessionId);
+  const CONCURRENT  = 3; // pages rescanned in parallel per batch
+  const MAX_PASSES  = 2; // maximum retry passes
+
+  for (let pass = 1; pass <= MAX_PASSES; pass++) {
+    if (session?._cancelledExternally) break;
+
+    // Load current page statuses from DB to find remaining error pages.
+    const full = await getFullSession(sessionId).catch(() => null);
+    if (!full) break;
+    const errorPages = full.pages.filter(p => p.status === 'error');
+    if (errorPages.length === 0) break;
+
+    console.log(`[auto-rescan] Pass ${pass}/${MAX_PASSES}: ${errorPages.length} page(s) — ${sessionId}`);
+
+    // Process in batches of CONCURRENT pages.
+    for (let i = 0; i < errorPages.length; i += CONCURRENT) {
+      if (session?._cancelledExternally) break;
+      const batch = errorPages.slice(i, i + CONCURRENT);
+
+      // Tell the client each page is now being rescanned.
+      for (const ep of batch) {
+        broadcastToAudit(sessionId, {
+          type: 'page-update',
+          data: { url: ep.url, status: 'rescanning', score: null, issueCount: 0, error: null, issues: null },
+        });
+      }
+
+      // Rescan all pages in the batch concurrently.
+      await Promise.allSettled(batch.map(async (ep) => {
+        try {
+          const result = await rescanPage(ep.url, { wcag22 });
+          await deletePageByUrl(sessionId, ep.url).catch(() => {});
+          await savePage(sessionId, result).catch(err =>
+            console.warn('[db] auto-rescan savePage error:', err.message)
+          );
+          // Update the in-memory session page (strip issues to save RAM).
+          if (session?.pages) {
+            const idx = session.pages.findIndex(p => p.url === ep.url);
+            if (idx >= 0) session.pages[idx] = { ...result, issues: null };
+          }
+          // Broadcast result WITH issues so the right panel updates immediately.
+          broadcastToAudit(sessionId, { type: 'page-update', data: result });
+        } catch (err) {
+          console.warn(`[auto-rescan] pass ${pass} failed for ${ep.url}: ${err.message}`);
+          const errPage = {
+            url: ep.url, status: 'error', score: null,
+            issueCount: 0, error: err.message, issues: [],
+          };
+          if (session?.pages) {
+            const idx = session.pages.findIndex(p => p.url === ep.url);
+            if (idx >= 0) session.pages[idx] = { ...errPage, issues: null };
+          }
+          broadcastToAudit(sessionId, { type: 'page-update', data: errPage });
+        }
+      }));
+    }
+  }
+
+  // Recompute and persist the updated summary.
+  const newSummary = await recomputeSummary(sessionId).catch(() => null);
+  if (newSummary) {
+    if (session) {
+      session.summary = newSummary;
+      await upsertSession(session).catch(() => {});
+    }
+    broadcastToAudit(sessionId, { type: 'summary-update', data: { summary: newSummary } });
   }
 }
 
