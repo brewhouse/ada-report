@@ -618,13 +618,17 @@ function updateLiveResults(session) {
     document.getElementById('page-count-badge').textContent = pages.length;
   }
 
-  // Update running summary stats from pages audited so far
+  // Update running summary stats from pages audited so far.
+  // Use page.issueCount (always set) rather than counting p.issues (may be
+  // nulled from RAM by savePageAndFreeMemory before this code runs).
   if (pages && pages.length > 0) {
     const completed = pages.filter(p => p.status === 'completed');
     const scores = completed.map(p => p.score).filter(s => s !== null);
+    const totalIssueCount = completed.reduce((sum, p) => sum + (p.issueCount || 0), 0);
+    // Severity counts: prefer real issue data when available, fall back to 0
     const allIssues = completed.flatMap(p => p.issues || []);
     document.getElementById('stat-pages').textContent = pages.length;
-    document.getElementById('stat-issues').textContent = allIssues.length;
+    document.getElementById('stat-issues').textContent = allIssues.length > 0 ? allIssues.length : totalIssueCount;
     document.getElementById('stat-critical').textContent = allIssues.filter(i => i.severity === 'critical').length;
     document.getElementById('stat-serious').textContent = allIssues.filter(i => i.severity === 'serious').length;
     document.getElementById('stat-moderate').textContent = allIssues.filter(i => i.severity === 'moderate').length;
@@ -770,7 +774,33 @@ function selectPage(page) {
   currentFilter = 'all';
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   document.querySelector('.filter-btn[data-severity="all"]').classList.add('active');
-  renderIssues(page.issues || []);
+
+  // If we have issues in memory, render immediately.
+  // If not but the page reports a non-zero issueCount, fetch from the API
+  // (issues may have been stripped from RAM after DB save).
+  if (page.issues && page.issues.length > 0) {
+    renderIssues(page.issues);
+  } else if (page.issueCount > 0 && currentAuditId) {
+    renderIssues([]); // show empty temporarily
+    fetch(`/api/audit/${currentAuditId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || selectedPageUrl !== page.url) return;
+        const dbPage = data.pages.find(p => p.url === page.url);
+        if (dbPage && dbPage.issues && dbPage.issues.length > 0) {
+          // Update in-memory cache so subsequent clicks don't re-fetch
+          page.issues = dbPage.issues;
+          if (currentSession) {
+            const idx = currentSession.pages.findIndex(p => p.url === page.url);
+            if (idx >= 0) currentSession.pages[idx].issues = dbPage.issues;
+          }
+          renderIssues(dbPage.issues);
+        }
+      })
+      .catch(() => {});
+  } else {
+    renderIssues([]);
+  }
 }
 
 async function rescanSinglePage(url) {

@@ -268,11 +268,13 @@ async function processAuditQueue() {
           }
         } else {
           Object.assign(session, update);
-          // Do NOT broadcast when status becomes 'completed' here — at this
-          // point pendingPageSaves haven't settled yet, so getFullSession
-          // would return pages with missing issues.  The definitive
-          // 'completed' broadcast happens below after all saves finish.
-          if (update.status !== 'completed') {
+          if (update.status === 'completed') {
+            // Kill any lingering debounced timer so it doesn't fire with
+            // stale data while we await pendingPageSaves below.
+            if (broadcastTimer) { clearTimeout(broadcastTimer); broadcastTimer = null; }
+            // Do NOT broadcast here — pendingPageSaves haven't settled yet.
+            // The definitive 'completed' broadcast happens below after all saves.
+          } else {
             flushBroadcast();
           }
         }
@@ -284,13 +286,21 @@ async function processAuditQueue() {
     await Promise.allSettled(pendingPageSaves);
 
     if (!session._cancelledExternally) {
+      // The summary computed inside startAudit is unreliable because
+      // savePageAndFreeMemory nulls page.issues for RAM savings BEFORE
+      // startAudit computes its summary (flatMap over p.issues).
+      // Recompute from the authoritative DB data instead.
+      try {
+        const dbSummary = await recomputeSummary(session.id);
+        session.summary = dbSummary;
+      } catch (err) {
+        console.warn('[db] recomputeSummary error, using startAudit summary:', err.message);
+      }
+
       await saveSessionToDb(session);
 
-      // The 'completed' broadcast from startAudit fires BEFORE pendingPageSaves
-      // settle, so the client's initial loadExistingAudit / getFullSession call
-      // may return pages with incomplete issue data.  Now that all saves are
-      // done, broadcast the definitive session from DB so the client ends up
-      // with every page's issues fully populated.
+      // Now broadcast the definitive session from DB — with full page issues
+      // and the correct summary — so the client renders everything accurately.
       try {
         const full = await getFullSession(session.id);
         if (full) {

@@ -277,21 +277,38 @@ export async function savePage(sessionId, page) {
     const rows = page.issues.map(issue => [
       pageId,
       sessionId,
-      issue.id          || null,
-      issue.wcag        || null,
-      issue.wcagLevel   || null,
-      issue.severity    || null,
-      (issue.title      || '').substring(0, 1000),
+      (issue.id          || '').substring(0, 150) || null,
+      (issue.wcag        || '').substring(0, 20)  || null,
+      (issue.wcagLevel   || '').substring(0, 10)  || null,
+      (issue.severity    || '').substring(0, 20)  || null,
+      (issue.title       || '').substring(0, 1000),
       issue.description || null,
       issue.count       || 1,
       issue.elements    ? JSON.stringify(issue.elements) : null,
     ]);
-    await pool.query(
-      `INSERT INTO audit_issues
-         (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
-       VALUES ?`,
-      [rows]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO audit_issues
+           (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
+         VALUES ?`,
+        [rows]
+      );
+    } catch (err) {
+      console.error(`[db] Failed to insert ${rows.length} issues for page ${pageId} (${page.url}): ${err.message}`);
+      // Retry one-by-one to salvage as many issues as possible
+      for (const row of rows) {
+        try {
+          await pool.execute(
+            `INSERT INTO audit_issues
+               (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
+             VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            row
+          );
+        } catch (e) {
+          console.error(`[db] Issue insert failed for page ${pageId}: ${e.message} — title: ${row[6]?.substring(0, 80)}`);
+        }
+      }
+    }
   }
 
   return pageId;
