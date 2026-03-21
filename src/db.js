@@ -149,6 +149,35 @@ export async function initDb() {
   }
 }
 
+// Diagnostic: test INSERT/SELECT/DELETE on audit_issues to verify DB writes work.
+export async function testIssueInsert() {
+  const testPageId = 999999999;
+  const testSessionId = 'test-issue-insert';
+  try {
+    // Insert
+    await pool.execute(
+      `INSERT INTO audit_issues
+         (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [testPageId, testSessionId, 'test-id', '1.1.1', 'A', 'critical', 'Test issue', 'Test desc', 1, '[]']
+    );
+    // Read back
+    const [rows] = await pool.execute(
+      'SELECT COUNT(*) as cnt FROM audit_issues WHERE page_id = ? AND session_id = ?',
+      [testPageId, testSessionId]
+    );
+    const count = rows[0].cnt;
+    // Clean up
+    await pool.execute(
+      'DELETE FROM audit_issues WHERE page_id = ? AND session_id = ?',
+      [testPageId, testSessionId]
+    );
+    return { success: true, insertedAndRead: count > 0 };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ── Session helpers ───────────────────────────────────────────────────────────
 
 function sessionToRow(session) {
@@ -257,6 +286,8 @@ export async function upsertSession(session) {
 // Write a single completed page (and its issues) to the database.
 // Returns the inserted audit_pages.id.
 export async function savePage(sessionId, page) {
+  console.log(`[db] savePage called: session=${sessionId}, url=${page.url}, status=${page.status}, issueCount=${page.issueCount}, hasIssues=${!!(page.issues && page.issues.length > 0)}, issuesLength=${page.issues?.length ?? 'null'}`);
+
   const [result] = await pool.execute(
     `INSERT INTO audit_pages
        (session_id, url, status, score, issue_count, error_message, audited_at)
@@ -272,6 +303,7 @@ export async function savePage(sessionId, page) {
     ]
   );
   const pageId = result.insertId;
+  console.log(`[db] Page inserted: pageId=${pageId}, now inserting ${page.issues?.length ?? 0} issues`);
 
   if (page.issues && page.issues.length > 0) {
     // Insert issues one-by-one using prepared statements to avoid bulk INSERT

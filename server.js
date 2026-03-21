@@ -80,9 +80,11 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', sessions: auditSessio
 // DB connectivity check — hit /api/db-status to confirm MySQL is reachable
 app.get('/api/db-status', async (_req, res) => {
   try {
-    const { initDb } = await import('./src/db.js');
+    const { initDb, testIssueInsert } = await import('./src/db.js');
     await initDb();
-    res.json({ status: 'connected', message: 'MySQL is reachable and tables are initialised' });
+    // Run a write/read/delete test on audit_issues
+    const testResult = await testIssueInsert();
+    res.json({ status: 'connected', message: 'MySQL is reachable and tables are initialised', issueInsertTest: testResult });
   } catch (err) {
     res.status(503).json({ status: 'error', message: err.message });
   }
