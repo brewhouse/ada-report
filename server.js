@@ -26,6 +26,14 @@ const __dirname = dirname(__filename);
 // node-cron registers SIGINT/SIGTERM/exit/SIGHUP listeners per scheduled task.
 process.setMaxListeners(100);
 
+// Prevent Lighthouse protocol errors from crashing the process.
+process.on('uncaughtException', (err) => {
+  console.error('[process] Uncaught exception (kept alive):', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[process] Unhandled rejection (kept alive):', reason?.message || reason);
+});
+
 // Reports directory — detailed HTML reports saved for scheduler dev-email links
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'data', 'sessions');
 

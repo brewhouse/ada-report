@@ -13,6 +13,13 @@
 
 import mysql from 'mysql2/promise';
 
+/** Safely parse a JSON string; returns `fallback` on any error. */
+function safeJsonParse(str, fallback) {
+  if (!str) return fallback;
+  try { return JSON.parse(str); }
+  catch { return fallback; }
+}
+
 // SSL is required by some providers (e.g. TiDB Cloud, PlanetScale).
 // Set MYSQL_SSL=true in Render environment variables to enable it.
 const sslConfig = process.env.MYSQL_SSL === 'true'
@@ -250,8 +257,8 @@ function rowToSession(row) {
       pagesBelow50:    row.pages_below_50,
     } : null,
     error:           row.error_message || null,
-    urlList:         row.url_list         ? JSON.parse(row.url_list)         : null,
-    excludeSitemaps: row.exclude_sitemaps ? JSON.parse(row.exclude_sitemaps) : null,
+    urlList:         safeJsonParse(row.url_list,         null),
+    excludeSitemaps: safeJsonParse(row.exclude_sitemaps, null),
   };
 }
 
@@ -526,14 +533,14 @@ function rowToSchedule(row) {
     name:           row.name           || '',
     url:            row.url,
     maxPages:       row.max_pages,
-    excludeSitemaps: row.exclude_sitemaps ? JSON.parse(row.exclude_sitemaps) : [],
+    excludeSitemaps: safeJsonParse(row.exclude_sitemaps, []),
     frequency:      row.frequency,
     dayOfWeek:      row.day_of_week,
     dayOfMonth:     row.day_of_month,
     hour:           row.hour,
     minute:         row.minute_val,
-    emails:         row.emails     ? JSON.parse(row.emails)     : [],
-    devEmails:      row.dev_emails ? JSON.parse(row.dev_emails) : [],
+    emails:         safeJsonParse(row.emails,     []),
+    devEmails:      safeJsonParse(row.dev_emails, []),
     brand:          row.brand          || 'planeteria',
     enabled:        row.enabled === 1,
     lastRun:        row.last_run        ? new Date(row.last_run).toISOString()        : null,
