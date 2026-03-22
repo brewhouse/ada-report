@@ -19,6 +19,7 @@ import {
   initDb, upsertSession, savePage, deletePageByUrl,
   loadSessionMetas, getFullSession, recomputeSummary, deleteOldSessions,
 } from './src/db.js';
+import { uploadReportPdfs } from './src/s3.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -728,10 +729,19 @@ app.post('/api/audit/:id/email', async (req, res) => {
   try {
     const session   = await getSessionForReport(req.params.id);
     const brandKey  = brand || null;
-    const [summaryPdf, vpatPdf] = await Promise.all([
+    const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
       generatePdfBuffer(generateSummaryReport(session, brandKey, false)),
+      generatePdfBuffer(generateReport(session, brandKey, false)),
       generatePdfBuffer(generateVpatReport(session, brandKey)),
     ]);
+
+    const domain   = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+    const date     = new Date().toISOString().split('T')[0];
+
+    // Upload all three PDFs to S3 for persistent access.
+    const s3Links = await uploadReportPdfs({
+      summaryPdf, detailPdf, vpatPdf, domain, date, sessionId: session.id,
+    });
 
     const transporter = nodemailer.createTransport({
       host:   process.env.SMTP_HOST,
@@ -740,14 +750,22 @@ app.post('/api/audit/:id/email', async (req, res) => {
       auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
 
-    const domain   = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-    const date     = new Date().toISOString().split('T')[0];
     const avgScore = session.summary?.averageScore ?? 0;
     // Prefer explicit BASE_URL env var; fall back to detecting from the request
     const proto    = req.get('x-forwarded-proto') || req.protocol;
     const host     = req.get('x-forwarded-host')  || req.get('host');
     const baseUrl  = (process.env.BASE_URL || `${proto}://${host}`).replace(/\/$/, '');
     const resultsUrl = `${baseUrl}/?auditId=${session.id}`;
+
+    // Build download links section for S3-hosted reports.
+    const downloadLinks = (s3Links.summaryUrl || s3Links.detailUrl || s3Links.vpatUrl) ? `
+          <p style="margin-top:24px;font-weight:600;">Download Reports:</p>
+          <ul style="list-style:none;padding:0;margin:8px 0 0 0;">
+            ${s3Links.summaryUrl ? `<li style="margin:6px 0;"><a href="${s3Links.summaryUrl}" style="color:#107DC2;text-decoration:none;">&#128196; ADA Summary Report (PDF)</a></li>` : ''}
+            ${s3Links.detailUrl  ? `<li style="margin:6px 0;"><a href="${s3Links.detailUrl}"  style="color:#107DC2;text-decoration:none;">&#128203; ADA Detailed Report (PDF)</a></li>` : ''}
+            ${s3Links.vpatUrl    ? `<li style="margin:6px 0;"><a href="${s3Links.vpatUrl}"    style="color:#107DC2;text-decoration:none;">&#128221; VPAT Conformance Report (PDF)</a></li>` : ''}
+          </ul>
+    ` : '';
 
     await transporter.sendMail({
       from:    process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -764,7 +782,8 @@ app.post('/api/audit/:id/email', async (req, res) => {
             <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Critical</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#dc2626;">${session.summary?.criticalIssues ?? 0}</td></tr>
             <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
           </table>
-          <p>
+          ${downloadLinks}
+          <p style="margin-top:20px;">
             <a href="${resultsUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">
               View Audit Results &amp; Re-scan Pages
             </a>
@@ -774,6 +793,7 @@ app.post('/api/audit/:id/email', async (req, res) => {
       `,
       attachments: [
         { filename: `accessibility-summary-${domain}-${date}.pdf`, content: summaryPdf, contentType: 'application/pdf' },
+        { filename: `accessibility-detail-${domain}-${date}.pdf`,  content: detailPdf,  contentType: 'application/pdf' },
         { filename: `vpat-report-${domain}-${date}.pdf`,           content: vpatPdf,    contentType: 'application/pdf' },
       ],
     });

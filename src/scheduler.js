@@ -11,6 +11,7 @@ import {
   loadSchedulesFromDb, patchScheduleInDb,
   savePage, upsertSession,
 } from './db.js';
+import { uploadReportPdfs } from './s3.js';
 
 const TIMEZONE        = 'America/Los_Angeles';
 const AUDIT_TIMEOUT_MS = 480 * 60 * 1000;
@@ -84,7 +85,7 @@ async function generatePdfBuffer(htmlContent) {
 
 // ── Email delivery ─────────────────────────────────────────────────────────────
 
-async function sendDevReport(session, schedule, reportUrl) {
+async function sendDevReport(session, schedule, s3Links) {
   if (!schedule.devEmails?.length) return;
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return;
 
@@ -98,6 +99,16 @@ async function sendDevReport(session, schedule, reportUrl) {
   const avg = session.summary?.averageScore ?? 0;
   const baseUrl    = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
   const resultsUrl = `${baseUrl}/?auditId=${session.id}`;
+
+  // Build download links section for S3-hosted reports.
+  const downloadLinks = (s3Links?.summaryUrl || s3Links?.detailUrl || s3Links?.vpatUrl) ? `
+        <p style="margin-top:24px;font-weight:600;">Download Reports:</p>
+        <ul style="list-style:none;padding:0;margin:8px 0 0 0;">
+          ${s3Links.summaryUrl ? `<li style="margin:6px 0;"><a href="${s3Links.summaryUrl}" style="color:#107DC2;text-decoration:none;">&#128196; ADA Summary Report (PDF)</a></li>` : ''}
+          ${s3Links.detailUrl  ? `<li style="margin:6px 0;"><a href="${s3Links.detailUrl}"  style="color:#107DC2;text-decoration:none;">&#128203; ADA Detailed Report (PDF)</a></li>` : ''}
+          ${s3Links.vpatUrl    ? `<li style="margin:6px 0;"><a href="${s3Links.vpatUrl}"    style="color:#107DC2;text-decoration:none;">&#128221; VPAT Conformance Report (PDF)</a></li>` : ''}
+        </ul>
+  ` : '';
 
   await transporter.sendMail({
     from:    process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -114,13 +125,12 @@ async function sendDevReport(session, schedule, reportUrl) {
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Critical</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#dc2626;">${session.summary?.criticalIssues ?? 0}</td></tr>
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious</td><td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
         </table>
-        <p>
-          <a href="${resultsUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;margin-right:12px;">
+        ${downloadLinks}
+        <p style="margin-top:20px;">
+          <a href="${resultsUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">
             View Audit Results &amp; Re-scan Pages
           </a>
-          ${reportUrl ? `<a href="${reportUrl}" style="display:inline-block;padding:10px 20px;background:#475569;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">Download Full Report</a>` : ''}
         </p>
-        ${reportUrl ? '<p style="font-size:12px;color:#94a3b8;margin-top:8px;">Report download link is valid for 30 days.</p>' : ''}
         <p style="font-size:12px;color:#94a3b8;margin-top:32px;">Scheduled report by Planeteria Inquiros ADA Checker</p>
       </div>
     `,
@@ -129,17 +139,11 @@ async function sendDevReport(session, schedule, reportUrl) {
   console.log(`[scheduler] Dev report emailed to ${schedule.devEmails.join(', ')} for ${schedule.url}`);
 }
 
-async function sendReport(session, schedule) {
+async function sendReport(session, schedule, s3Links, { summaryPdf, detailPdf, vpatPdf }) {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
     console.warn('[scheduler] SMTP not configured — skipping email for schedule:', schedule.id);
     return;
   }
-
-  const brand = schedule.brand || null;
-  const [summaryPdf, vpatPdf] = await Promise.all([
-    generatePdfBuffer(generateSummaryReport(session, brand, false)),
-    generatePdfBuffer(generateVpatReport(session, brand)),
-  ]);
 
   const transporter = nodemailer.createTransport({
     host:   process.env.SMTP_HOST,
@@ -153,6 +157,16 @@ async function sendReport(session, schedule) {
   const avg        = session.summary?.averageScore ?? 0;
   const baseUrl    = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
   const resultsUrl = `${baseUrl}/?auditId=${session.id}`;
+
+  // Build download links section for S3-hosted reports.
+  const downloadLinks = (s3Links?.summaryUrl || s3Links?.detailUrl || s3Links?.vpatUrl) ? `
+        <p style="margin-top:24px;font-weight:600;">Download Reports:</p>
+        <ul style="list-style:none;padding:0;margin:8px 0 0 0;">
+          ${s3Links.summaryUrl ? `<li style="margin:6px 0;"><a href="${s3Links.summaryUrl}" style="color:#107DC2;text-decoration:none;">&#128196; ADA Summary Report (PDF)</a></li>` : ''}
+          ${s3Links.detailUrl  ? `<li style="margin:6px 0;"><a href="${s3Links.detailUrl}"  style="color:#107DC2;text-decoration:none;">&#128203; ADA Detailed Report (PDF)</a></li>` : ''}
+          ${s3Links.vpatUrl    ? `<li style="margin:6px 0;"><a href="${s3Links.vpatUrl}"    style="color:#107DC2;text-decoration:none;">&#128221; VPAT Conformance Report (PDF)</a></li>` : ''}
+        </ul>
+  ` : '';
 
   await transporter.sendMail({
     from:    process.env.SMTP_FROM || process.env.SMTP_USER,
@@ -176,7 +190,8 @@ async function sendReport(session, schedule) {
           <tr><td style="padding:8px 12px;border:1px solid #e2e8f0;font-weight:600;background:#f8fafc;">Serious Issues</td>
               <td style="padding:8px 12px;border:1px solid #e2e8f0;color:#ea580c;">${session.summary?.seriousIssues ?? 0}</td></tr>
         </table>
-        <p>
+        ${downloadLinks}
+        <p style="margin-top:20px;">
           <a href="${resultsUrl}" style="display:inline-block;padding:10px 20px;background:#107DC2;color:#fff;border-radius:5px;text-decoration:none;font-weight:600;">
             View Audit Results &amp; Re-scan Pages
           </a>
@@ -188,6 +203,7 @@ async function sendReport(session, schedule) {
     `,
     attachments: [
       { filename: `accessibility-summary-${domain}-${date}.pdf`, content: summaryPdf, contentType: 'application/pdf' },
+      { filename: `accessibility-detail-${domain}-${date}.pdf`,  content: detailPdf,  contentType: 'application/pdf' },
       { filename: `vpat-report-${domain}-${date}.pdf`,           content: vpatPdf,    contentType: 'application/pdf' },
     ],
   });
@@ -261,29 +277,42 @@ async function runScheduledAudit(scheduleId) {
         console.warn('[scheduler][db] upsertSession error:', err.message)
       );
 
-      // Generate reports directly from in-memory session (has full issues).
-      let reportUrl = null;
+      // Generate all three report PDFs once, upload to S3, then email.
+      const brand  = schedule.brand || null;
+      const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
+      const date   = new Date().toISOString().split('T')[0];
+
+      const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
+        generatePdfBuffer(generateSummaryReport(session, brand, false)),
+        generatePdfBuffer(generateReport(session, brand, false)),
+        generatePdfBuffer(generateVpatReport(session, brand)),
+      ]);
+
+      // Upload to S3 for persistent access.
+      const s3Links = await uploadReportPdfs({
+        summaryPdf, detailPdf, vpatPdf, domain, date, sessionId: session.id,
+      });
+
+      // Also save detailed HTML report to local disk as a fallback.
       if (reportsDir) {
         try {
-          const domain       = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
-          const date         = new Date().toISOString().split('T')[0];
           const reportFilename = `${domain}-${date}-${session.id}.html`;
-          const reportHtml   = generateReport(session, schedule.brand || null, false);
+          const reportHtml = generateReport(session, brand, false);
           await writeFile(join(reportsDir, reportFilename), reportHtml, 'utf8');
-          const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-          reportUrl = `${baseUrl}/api/reports/${reportFilename}`;
-          console.log(`[scheduler] Detailed report saved: ${reportFilename}`);
+          console.log(`[scheduler] Detailed report saved locally: ${reportFilename}`);
         } catch (err) {
-          console.warn('[scheduler] Failed to save detailed report:', err.message);
+          console.warn('[scheduler] Failed to save detailed report locally:', err.message);
         }
       }
 
-      await sendReport(session, schedule);
-      if (reportUrl) {
-        await sendDevReport(session, schedule, reportUrl).catch(err =>
-          console.warn('[scheduler] Dev report email failed:', err.message)
-        );
-      }
+      // Send emails with S3 links and PDF attachments.
+      const pdfs = { summaryPdf, detailPdf, vpatPdf };
+      await sendReport(session, schedule, s3Links, pdfs).catch(err =>
+        console.warn('[scheduler] Report email failed:', err.message)
+      );
+      await sendDevReport(session, schedule, s3Links).catch(err =>
+        console.warn('[scheduler] Dev report email failed:', err.message)
+      );
       await patchSchedule(scheduleId, { lastRun: startedAt, lastRunStatus: 'success', lastRunError: null });
       console.log(`[scheduler] Completed — ${schedule.url}`);
     } else {

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@aws-sdk/client-s3": "^3.1014.0",
     "accessibility-checker": "^4.0.13",
     "accessibility-checker-engine": "^4.0.13",
     "axe-core": "^4.11.1",
