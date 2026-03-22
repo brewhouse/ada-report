@@ -9,7 +9,7 @@ import { generateReport, generateSummaryReport, generateVpatReport } from './rep
 import {
   upsertScheduleToDb, deleteScheduleFromDb,
   loadSchedulesFromDb, patchScheduleInDb,
-  savePage,
+  savePage, upsertSession,
 } from './db.js';
 
 const TIMEZONE        = 'America/Los_Angeles';
@@ -225,6 +225,11 @@ async function runScheduledAudit(scheduleId) {
     setTimeout(() => reject(new Error('Scheduled audit timed out')), AUDIT_TIMEOUT_MS)
   );
 
+  // Register session so it shows in the live queue on the landing page.
+  if (_registerSession) _registerSession(session);
+
+  const pendingPageSaves = [];
+
   try {
     await Promise.race([
       startAudit(session, update => {
@@ -232,10 +237,11 @@ async function runScheduledAudit(scheduleId) {
           if (update.completedPage) {
             const page = update.completedPage;
             session.pages.push(page);
-            // Persist page to DB and free issues from memory.
-            savePage(session.id, page)
-              .then(() => { page.issues = null; })
+            // Persist page to DB immediately — keep issues in memory for
+            // report generation and summary computation.
+            const p = savePage(session.id, page)
               .catch(err => console.warn('[scheduler][db] savePage error:', err.message));
+            pendingPageSaves.push(p);
           }
           const { completedPage, ...rest } = update;
           Object.assign(session, rest);
@@ -246,18 +252,23 @@ async function runScheduledAudit(scheduleId) {
       timeout,
     ]);
 
+    // Wait for all page saves to finish before generating reports.
+    await Promise.allSettled(pendingPageSaves);
+
     if (session.status === 'completed') {
-      // Save detailed HTML report to disk for developer email link.
+      // Persist session metadata + summary to DB so the "View Results" link works.
+      await upsertSession(session).catch(err =>
+        console.warn('[scheduler][db] upsertSession error:', err.message)
+      );
+
+      // Generate reports directly from in-memory session (has full issues).
       let reportUrl = null;
       if (reportsDir) {
         try {
-          // Re-attach issues from DB for report generation.
-          const { getFullSession } = await import('./db.js');
-          const fullSession = await getFullSession(session.id);
           const domain       = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
           const date         = new Date().toISOString().split('T')[0];
           const reportFilename = `${domain}-${date}-${session.id}.html`;
-          const reportHtml   = generateReport(fullSession || session, schedule.brand || null, false);
+          const reportHtml   = generateReport(session, schedule.brand || null, false);
           await writeFile(join(reportsDir, reportFilename), reportHtml, 'utf8');
           const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
           reportUrl = `${baseUrl}/api/reports/${reportFilename}`;
@@ -276,6 +287,9 @@ async function runScheduledAudit(scheduleId) {
       await patchSchedule(scheduleId, { lastRun: startedAt, lastRunStatus: 'success', lastRunError: null });
       console.log(`[scheduler] Completed — ${schedule.url}`);
     } else {
+      session.status = session.status || 'error';
+      session.endTime = new Date().toISOString();
+      await upsertSession(session).catch(() => {});
       await patchSchedule(scheduleId, {
         lastRun: startedAt, lastRunStatus: 'error',
         lastRunError: session.error || 'Audit did not complete',
@@ -283,6 +297,11 @@ async function runScheduledAudit(scheduleId) {
     }
   } catch (err) {
     console.error(`[scheduler] Audit failed — ${schedule.url}:`, err.message);
+    await Promise.allSettled(pendingPageSaves);
+    session.status = 'error';
+    session.error = err.message;
+    session.endTime = new Date().toISOString();
+    await upsertSession(session).catch(() => {});
     await patchSchedule(scheduleId, { lastRun: startedAt, lastRunStatus: 'error', lastRunError: err.message });
   }
 }
@@ -321,7 +340,12 @@ function registerCronJob(schedule) {
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
-export async function initScheduler(dataDir) {
+// Callback provided by server.js so scheduler can register sessions in the
+// shared auditSessions map, making them visible in the live queue.
+let _registerSession = null;
+
+export async function initScheduler(dataDir, registerSessionFn) {
+  _registerSession = registerSessionFn || null;
   reportsDir = join(dataDir, 'reports');
   await mkdir(reportsDir, { recursive: true }).catch(() => {});
 

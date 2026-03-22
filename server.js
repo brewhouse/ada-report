@@ -1004,7 +1004,10 @@ try {
   console.error('[db] ⚠️  Running without DB persistence. Check MYSQL_HOST and Cloudways firewall (whitelist this server\'s IP).');
 }
 
-await initScheduler(DATA_DIR);
+await initScheduler(DATA_DIR, (session) => {
+  // Register scheduler-initiated sessions so they appear in the live queue.
+  auditSessions.set(session.id, session);
+});
 
 // Prune sessions older than 30 days every 24 hours.
 setInterval(() => {
