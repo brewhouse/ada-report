@@ -652,23 +652,28 @@ export async function runLighthouseAudit(url, browser, opts = {}) {
     });
   }
 
-  // Run axe-core for supplemental WCAG coverage + collect interactive labels
+  // Run axe-core and IBM Equal Access Checker in parallel — each opens its own
+  // page in the same browser, so they don't block each other.
   let axeIssues = [];
   let interactiveLabels = [];
-  try {
-    const axeResult = await runAxeAudit(url, browser);
-    axeIssues = axeResult.issues;
-    interactiveLabels = axeResult.interactiveLabels || [];
-  } catch (err) {
-    console.warn(`[axe] Skipped for ${url}: ${err.message}`);
+  let ibmIssues = [];
+
+  const [axeResult, ibmResult] = await Promise.allSettled([
+    runAxeAudit(url, browser),
+    runIbmAudit(url, browser),
+  ]);
+
+  if (axeResult.status === 'fulfilled') {
+    axeIssues = axeResult.value.issues;
+    interactiveLabels = axeResult.value.interactiveLabels || [];
+  } else {
+    console.warn(`[axe] Skipped for ${url}: ${axeResult.reason?.message}`);
   }
 
-  // Run IBM Equal Access Checker for criteria not covered by Lighthouse or axe
-  let ibmIssues = [];
-  try {
-    ibmIssues = await runIbmAudit(url, browser);
-  } catch (err) {
-    console.warn(`[ibm] Skipped for ${url}: ${err.message}`);
+  if (ibmResult.status === 'fulfilled') {
+    ibmIssues = ibmResult.value;
+  } else {
+    console.warn(`[ibm] Skipped for ${url}: ${ibmResult.reason?.message}`);
   }
 
   // Optionally run WCAG 2.2 checks (axe target-size + custom Puppeteer heuristics)

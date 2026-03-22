@@ -322,32 +322,62 @@ export async function savePage(sessionId, page) {
   console.log(`[db] Page inserted: pageId=${pageId}, now inserting ${page.issues?.length ?? 0} issues`);
 
   if (page.issues && page.issues.length > 0) {
-    // Insert issues one-by-one using prepared statements to avoid bulk INSERT
-    // failures (VALUES ? with pool.query has been unreliable on some MySQL
-    // configurations, silently failing and leaving audit_issues empty).
+    // Batch INSERT issues in groups of 20 to reduce DB round trips while
+    // keeping individual error visibility.
+    const BATCH_SIZE = 20;
     let saved = 0;
-    for (const issue of page.issues) {
+    for (let i = 0; i < page.issues.length; i += BATCH_SIZE) {
+      const batch = page.issues.slice(i, i + BATCH_SIZE);
+      const placeholders = batch.map(() => '(?,?,?,?,?,?,?,?,?,?)').join(',');
+      const values = [];
+      for (const issue of batch) {
+        values.push(
+          pageId,
+          sessionId,
+          (issue.id        || '').substring(0, 150) || null,
+          (issue.wcag      || '').substring(0, 20)  || null,
+          (issue.wcagLevel || '').substring(0, 10)  || null,
+          (issue.severity  || '').substring(0, 20)  || null,
+          (issue.title     || '').substring(0, 1000),
+          issue.description || null,
+          issue.count      || 1,
+          issue.elements   ? JSON.stringify(issue.elements) : null,
+        );
+      }
       try {
-        await pool.execute(
+        await pool.query(
           `INSERT INTO audit_issues
              (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`,
-          [
-            pageId,
-            sessionId,
-            (issue.id        || '').substring(0, 150) || null,
-            (issue.wcag      || '').substring(0, 20)  || null,
-            (issue.wcagLevel || '').substring(0, 10)  || null,
-            (issue.severity  || '').substring(0, 20)  || null,
-            (issue.title     || '').substring(0, 1000),
-            issue.description || null,
-            issue.count      || 1,
-            issue.elements   ? JSON.stringify(issue.elements) : null,
-          ]
+           VALUES ${placeholders}`,
+          values
         );
-        saved++;
+        saved += batch.length;
       } catch (e) {
-        console.error(`[db] Issue insert failed for page ${pageId}: ${e.message} — id: ${issue.id}, title: ${(issue.title || '').substring(0, 60)}`);
+        // Batch failed — fall back to one-by-one for this batch to save what we can.
+        console.warn(`[db] Batch insert failed for page ${pageId}, falling back to individual inserts: ${e.message}`);
+        for (const issue of batch) {
+          try {
+            await pool.execute(
+              `INSERT INTO audit_issues
+                 (page_id, session_id, issue_id, wcag, wcag_level, severity, title, description, issue_count, elements)
+               VALUES (?,?,?,?,?,?,?,?,?,?)`,
+              [
+                pageId, sessionId,
+                (issue.id        || '').substring(0, 150) || null,
+                (issue.wcag      || '').substring(0, 20)  || null,
+                (issue.wcagLevel || '').substring(0, 10)  || null,
+                (issue.severity  || '').substring(0, 20)  || null,
+                (issue.title     || '').substring(0, 1000),
+                issue.description || null,
+                issue.count      || 1,
+                issue.elements   ? JSON.stringify(issue.elements) : null,
+              ]
+            );
+            saved++;
+          } catch (e2) {
+            console.error(`[db] Issue insert failed for page ${pageId}: ${e2.message} — id: ${issue.id}`);
+          }
+        }
       }
     }
     if (saved !== page.issues.length) {

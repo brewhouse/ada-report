@@ -103,11 +103,12 @@ async function parseSitemap(xml, origin, depth = 0) {
   });
 
   if (childSitemaps.length > 0) {
-    for (const childUrl of childSitemaps) {
-      const childXml = await fetchXml(childUrl);
-      const childUrls = await parseSitemap(childXml, origin, depth + 1);
-      urls.push(...childUrls);
-    }
+    // Fetch all child sitemaps in parallel for faster discovery.
+    const childXmls = await Promise.all(childSitemaps.map(u => fetchXml(u)));
+    const childResults = await Promise.all(
+      childXmls.map(xml => parseSitemap(xml, origin, depth + 1))
+    );
+    for (const childUrls of childResults) urls.push(...childUrls);
     return urls;
   }
 
@@ -180,6 +181,7 @@ async function discoverFromSitemap(rootUrl) {
 
 async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = null) {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+  const CRAWL_CONCURRENCY = 4;
 
   const browser = await puppeteer.launch({
     headless: 'new',
@@ -196,64 +198,73 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
   });
 
   const visited = new Set();
+  const queued = new Set([rootUrl]);
   const queue = [rootUrl];
   const pages = [];
 
-  try {
-    while (queue.length > 0 && pages.length < maxPages) {
-      const url = queue.shift();
-      if (!url || visited.has(url)) continue;
-      visited.add(url);
+  async function crawlPage(url) {
+    const page = await browser.newPage();
+    try {
+      await page.setUserAgent(
+        'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)'
+      );
 
-      const page = await browser.newPage();
-      try {
-        await page.setUserAgent(
-          'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)'
-        );
+      // Fast initial load — DOMContentLoaded is enough for PHP/server-rendered pages
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-        // Fast initial load — DOMContentLoaded is enough for PHP/server-rendered pages
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      // Detect whether this is a server-rendered page (PHP/WordPress) or a JS SPA.
+      const [initialLinks, initialTextLen] = await Promise.all([
+        page.$$eval('a[href]', els => els.length).catch(() => 0),
+        page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0),
+      ]);
+      const isServerRendered = initialLinks >= 5 || initialTextLen > 400;
 
-        // Detect whether this is a server-rendered page (PHP/WordPress) or a JS SPA.
-        // Server-rendered pages have rich content immediately after DOMContentLoaded;
-        // React/Vue/Angular pages start nearly empty and fill in after API calls settle.
-        const [initialLinks, initialTextLen] = await Promise.all([
-          page.$$eval('a[href]', els => els.length).catch(() => 0),
-          page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0),
-        ]);
-        const isServerRendered = initialLinks >= 5 || initialTextLen > 400;
-
-        if (!isServerRendered) {
-          // SPA / JS-rendered — wait for network to go quiet then give React time to paint
-          await page.waitForNetworkIdle({ idleTime: 500, timeout: 30000 }).catch(() => {});
-          await new Promise(r => setTimeout(r, 1500));
-        }
-
-        const finalUrl = page.url();
-        const normFinal = normalizeUrl(rootUrl, finalUrl) || url;
-        visited.add(normFinal);
-
-        if (!pages.includes(normFinal) && !(excludeUrls && excludeUrls.has(normFinal))) {
-          pages.push(normFinal);
-          if (onProgress) onProgress(pages.length);
-        }
-
-        // Extract links from fully-rendered DOM
-        const hrefs = await page.$$eval('a[href]', els =>
-          els.map(e => e.getAttribute('href'))
-        );
-
-        for (const href of hrefs) {
-          const norm = normalizeUrl(rootUrl, href);
-          if (norm && !visited.has(norm) && !queue.includes(norm) && !(excludeUrls && excludeUrls.has(norm))) {
-            queue.push(norm);
-          }
-        }
-      } catch (err) {
-        if (process.env.DEBUG) console.warn(`[crawler] skip ${url}: ${err.message}`);
-      } finally {
-        await page.close().catch(() => {});
+      if (!isServerRendered) {
+        // SPA / JS-rendered — wait for network to go quiet then give React time to paint
+        await page.waitForNetworkIdle({ idleTime: 500, timeout: 30000 }).catch(() => {});
+        await new Promise(r => setTimeout(r, 1500));
       }
+
+      const finalUrl = page.url();
+      const normFinal = normalizeUrl(rootUrl, finalUrl) || url;
+      visited.add(normFinal);
+
+      if (!pages.includes(normFinal) && !(excludeUrls && excludeUrls.has(normFinal))) {
+        pages.push(normFinal);
+        if (onProgress) onProgress(pages.length);
+      }
+
+      // Extract links from fully-rendered DOM
+      const hrefs = await page.$$eval('a[href]', els =>
+        els.map(e => e.getAttribute('href'))
+      );
+
+      for (const href of hrefs) {
+        const norm = normalizeUrl(rootUrl, href);
+        if (norm && !visited.has(norm) && !queued.has(norm) && !(excludeUrls && excludeUrls.has(norm))) {
+          queued.add(norm);
+          queue.push(norm);
+        }
+      }
+    } catch (err) {
+      if (process.env.DEBUG) console.warn(`[crawler] skip ${url}: ${err.message}`);
+    } finally {
+      await page.close().catch(() => {});
+    }
+  }
+
+  try {
+    // Process queue with up to CRAWL_CONCURRENCY parallel page loads.
+    while (queue.length > 0 && pages.length < maxPages) {
+      const batch = [];
+      while (batch.length < CRAWL_CONCURRENCY && queue.length > 0 && (pages.length + batch.length) < maxPages) {
+        const url = queue.shift();
+        if (!url || visited.has(url)) continue;
+        visited.add(url);
+        batch.push(url);
+      }
+      if (batch.length === 0) break;
+      await Promise.allSettled(batch.map(url => crawlPage(url)));
     }
   } finally {
     await browser.close().catch(() => {});

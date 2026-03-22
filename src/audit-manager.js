@@ -132,7 +132,7 @@ export function forceReleaseGlobalSlot() {
 }
 
 // Number of pages to audit in parallel within a single audit (each page = one browser).
-const CONCURRENT_PAGES = 2;
+const CONCURRENT_PAGES = 4;
 
 export async function startAudit(session, onUpdate) {
   await _acquireGlobalSlot();
@@ -207,13 +207,17 @@ async function _runAudit(session, onUpdate) {
   });
 
   // Phase 2: Launch a pool of browsers for parallel auditing.
-  // Launch sequentially so partial failures still get cleaned up in finally.
   const concurrency = Math.min(CONCURRENT_PAGES, pages.length);
   const browsers = [];
   try {
-    for (let k = 0; k < concurrency; k++) {
-      browsers.push(await launchBrowser());
+    const launched = await Promise.allSettled(
+      Array.from({ length: concurrency }, () => launchBrowser())
+    );
+    for (const r of launched) {
+      if (r.status === 'fulfilled') browsers.push(r.value);
+      else console.warn('[audit] Browser launch failed:', r.reason?.message);
     }
+    if (browsers.length === 0) throw new Error('Failed to launch any browsers');
 
     // Phase 3: Audit pages in parallel using a shared queue index.
     // In JavaScript's single-threaded event loop, `pageIndex++` is atomic
