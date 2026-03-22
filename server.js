@@ -99,6 +99,42 @@ app.get('/api/db-status', async (_req, res) => {
   }
 });
 
+// Diagnostic endpoint — tests S3 connectivity by uploading and deleting a small test file.
+app.get('/api/s3-status', async (_req, res) => {
+  try {
+    const { S3Client, PutObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+    const bucket = process.env.S3_BUCKET || 'planeteria-pdf-report';
+    const region = process.env.AWS_REGION || 'us-west-2';
+
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+      return res.status(503).json({ status: 'not_configured', message: 'AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not set' });
+    }
+
+    const client = new S3Client({
+      region,
+      credentials: {
+        accessKeyId:     process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      },
+    });
+
+    const testKey = '_test/s3-connectivity-check.txt';
+    await client.send(new PutObjectCommand({
+      Bucket: bucket, Key: testKey, Body: 'ok', ContentType: 'text/plain',
+    }));
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: testKey }));
+
+    res.json({
+      status: 'connected',
+      bucket,
+      region,
+      message: 'S3 upload and delete succeeded',
+    });
+  } catch (err) {
+    res.status(503).json({ status: 'error', message: err.message });
+  }
+});
+
 // Diagnostic endpoint — checks DB state for a session
 app.get('/api/audit/:id/debug', async (req, res) => {
   try {
