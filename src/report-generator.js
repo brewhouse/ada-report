@@ -93,13 +93,14 @@ function renderIssuesTable(issues) {
         <p style="margin:0 0 4px;font-size:11px;color:#475569;">${escapeHtml(issue.description)}</p>
         ${issue.elements && issue.elements.length > 0 ? `
           <div style="margin-top:4px;">
-            ${issue.elements.slice(0, 3).map(el => `
+            <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#334155;">${issue.count || issue.elements.length} element${(issue.count || issue.elements.length) !== 1 ? 's' : ''} affected:</p>
+            ${issue.elements.slice(0, 8).map(el => `
               <div style="margin-bottom:3px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:3px;padding:3px 8px;">
                 <code style="font-size:10px;color:#475569;word-break:break-all;">${escapeHtml(el.snippet || el.selector)}</code>
-                ${el.explanation ? `<div style="font-size:10px;color:#64748b;margin-top:1px;">${escapeHtml(el.explanation)}</div>` : ''}
+                ${el.explanation ? `<div style="font-size:10px;color:#64748b;margin-top:2px;font-style:italic;">${escapeHtml(el.explanation)}</div>` : ''}
               </div>
             `).join('')}
-            ${issue.elements.length > 3 ? `<p style="font-size:10px;color:#94a3b8;margin:2px 0 0;">...and ${issue.elements.length - 3} more elements</p>` : ''}
+            ${issue.elements.length > 8 ? `<p style="font-size:10px;color:#94a3b8;margin:2px 0 0;">...and ${issue.elements.length - 8} more elements</p>` : ''}
           </div>
         ` : ''}
       </div>
