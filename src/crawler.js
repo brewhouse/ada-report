@@ -181,7 +181,7 @@ async function discoverFromSitemap(rootUrl) {
 
 async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = null) {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-  const CRAWL_CONCURRENCY = 4;
+  const CRAWL_CONCURRENCY = 3;
 
   const browser = await puppeteer.launch({
     headless: 'new',

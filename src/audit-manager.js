@@ -132,7 +132,7 @@ export function forceReleaseGlobalSlot() {
 }
 
 // Number of pages to audit in parallel within a single audit (each page = one browser).
-const CONCURRENT_PAGES = 4;
+const CONCURRENT_PAGES = 3;
 
 export async function startAudit(session, onUpdate) {
   await _acquireGlobalSlot();
