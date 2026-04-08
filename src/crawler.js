@@ -193,6 +193,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
       '--disable-gpu',
       '--no-first-run',
       '--no-zygote',
+      '--disable-crash-reporter',
       '--disable-extensions',
     ],
   });

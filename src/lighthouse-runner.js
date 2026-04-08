@@ -528,6 +528,8 @@ export async function launchBrowser() {
           '--metrics-recording-only',
           '--mute-audio',
           '--safebrowsing-disable-auto-update',
+          '--no-zygote',
+          '--disable-crash-reporter',
         ],
       }),
       timeoutPromise,
