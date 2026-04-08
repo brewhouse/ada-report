@@ -132,7 +132,8 @@ export function forceReleaseGlobalSlot() {
 }
 
 // Number of pages to audit in parallel within a single audit (each page = one browser).
-const CONCURRENT_PAGES = 2;
+// Kept at 1 on Render to avoid exhausting process/memory limits that cause Chrome to crash.
+const CONCURRENT_PAGES = 1;
 
 export async function startAudit(session, onUpdate) {
   await _acquireGlobalSlot();
