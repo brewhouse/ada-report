@@ -111,7 +111,7 @@ export async function rescanPage(url, opts = {}) {
 // Global semaphore — caps total concurrent audits regardless of code path
 // (manual queue + scheduled triggers combined).
 let _globalAuditCount = 0;
-const _MAX_GLOBAL_AUDITS = 4;
+const _MAX_GLOBAL_AUDITS = 3;
 const _globalWaiters = [];
 
 function _acquireGlobalSlot() {
@@ -132,8 +132,8 @@ export function forceReleaseGlobalSlot() {
 }
 
 // Number of pages to audit in parallel within a single audit (each page = one browser).
-// Kept at 1 on Render to avoid exhausting process/memory limits that cause Chrome to crash.
-const CONCURRENT_PAGES = 1;
+// 4 pages × up to 3 simultaneous audits = 12 Chrome instances max on Render (8 CPU).
+const CONCURRENT_PAGES = 4;
 
 export async function startAudit(session, onUpdate) {
   await _acquireGlobalSlot();
