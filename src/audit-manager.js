@@ -208,15 +208,18 @@ async function _runAudit(session, onUpdate) {
   });
 
   // Phase 2: Launch a pool of browsers for parallel auditing.
+  // Launch sequentially with a short stagger so Chrome instances don't all
+  // compete for OS resources simultaneously (causes fork failures on Render).
   const concurrency = Math.min(CONCURRENT_PAGES, pages.length);
   const browsers = [];
   try {
-    const launched = await Promise.allSettled(
-      Array.from({ length: concurrency }, () => launchBrowser())
-    );
-    for (const r of launched) {
-      if (r.status === 'fulfilled') browsers.push(r.value);
-      else console.warn('[audit] Browser launch failed:', r.reason?.message);
+    for (let i = 0; i < concurrency; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      try {
+        browsers.push(await launchBrowser());
+      } catch (err) {
+        console.warn('[audit] Browser launch failed:', err.message);
+      }
     }
     if (browsers.length === 0) throw new Error('Failed to launch any browsers');
 
