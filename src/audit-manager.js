@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { crawlWebsite, fetchUrlsFromSitemaps } from './crawler.js';
-import { launchBrowser, closeBrowser, runLighthouseAudit } from './lighthouse-runner.js';
+import { launchBrowser, closeBrowser, runLighthouseAudit, killAllChrome } from './lighthouse-runner.js';
 import { analyzeConsistency } from './consistency-checker.js';
 
 const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
@@ -206,6 +206,9 @@ async function _runAudit(session, onUpdate) {
   });
 
   // Phase 2: Launch a pool of browsers for parallel auditing.
+  // Kill any stray Chrome processes first — previous crashed/timed-out audits
+  // may leave orphans that exhaust the container process limit on Render.
+  killAllChrome();
   // Launch sequentially with a short stagger so Chrome instances don't all
   // compete for OS resources simultaneously (causes fork failures on Render).
   const concurrency = Math.min(CONCURRENT_PAGES, pages.length);
@@ -219,7 +222,18 @@ async function _runAudit(session, onUpdate) {
         console.warn('[audit] Browser launch failed:', err.message);
       }
     }
-    if (browsers.length === 0) throw new Error('Failed to launch any browsers');
+    if (browsers.length === 0) {
+      // Pool launch failed entirely — kill any lingering Chrome, wait 5 s,
+      // then try one last time with a single browser before giving up.
+      console.warn('[audit] All pool launches failed — running emergency cleanup and retrying with 1 browser');
+      killAllChrome();
+      await new Promise(r => setTimeout(r, 5000));
+      try {
+        browsers.push(await launchBrowser());
+      } catch (err) {
+        throw new Error(`Failed to launch any browsers: ${err.message}`);
+      }
+    }
 
     // Phase 3: Audit pages in parallel using a shared queue index.
     // In JavaScript's single-threaded event loop, `pageIndex++` is atomic

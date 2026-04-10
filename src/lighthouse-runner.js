@@ -497,6 +497,27 @@ function extractElements(audit) {
   }).filter(Boolean);
 }
 
+// Kill every Chrome/Chromium process in the container before launching a new
+// browser pool.  Called at the start of each audit so stray processes from
+// previous (possibly crashed) audits can't exhaust the Render process limit.
+// On non-Linux platforms this is a no-op — dev machines manage Chrome fine.
+export function killAllChrome() {
+  if (process.platform !== 'linux') return;
+  try {
+    const allPids = readdirSync('/proc').filter(f => /^\d+$/.test(f)).map(Number);
+    let killed = 0;
+    for (const pid of allPids) {
+      try {
+        const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+        if (/^(chrome|chromium|chrome-sandbox|chrome_crashpad)/.test(comm)) {
+          try { process.kill(pid, 'SIGKILL'); killed++; } catch {}
+        }
+      } catch {}
+    }
+    if (killed > 0) console.log(`[browser] Pre-launch cleanup: killed ${killed} stray Chrome process(es)`);
+  } catch {}
+}
+
 // Recursively collect all descendant PIDs of a process by reading /proc.
 // On Linux, Chrome spawns renderer/network/GPU helper child processes that
 // become orphaned when only the parent is killed. This walks the full tree.
