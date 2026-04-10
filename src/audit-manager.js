@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { crawlWebsite, fetchUrlsFromSitemaps } from './crawler.js';
-import { launchBrowser, runLighthouseAudit } from './lighthouse-runner.js';
+import { launchBrowser, closeBrowser, runLighthouseAudit } from './lighthouse-runner.js';
 import { analyzeConsistency } from './consistency-checker.js';
 
 const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
@@ -19,7 +19,7 @@ function isNonRetryableError(error) {
 // the browser before retrying, otherwise the retry will fail identically.
 function requiresBrowserReplace(error) {
   const msg = error.message || '';
-  return /performance mark has not been set|lh:runner|lh:driver/i.test(msg);
+  return /performance mark has not been set|lh:runner|lh:driver|webSocket URL|websocket|CDP|target closed|connection closed/i.test(msg);
 }
 
 // Normalize a pathname for comparison: strip trailing slash, lowercase.
@@ -102,9 +102,7 @@ export async function rescanPage(url, opts = {}) {
     }
     return pageResult;
   } finally {
-    await browser.close().catch((err) => {
-      if (process.env.DEBUG) console.warn('Browser close error:', err.message);
-    });
+    await closeBrowser(browser);
   }
 }
 
@@ -233,8 +231,7 @@ async function _runAudit(session, onUpdate) {
     // Kill a browser by index and replace it with a fresh one.
     // Called whenever a page error/timeout leaves Chrome in a bad state.
     async function replaceBrowser(idx) {
-      try { browsers[idx].process()?.kill('SIGKILL'); } catch {}
-      await browsers[idx].close().catch(() => {});
+      await closeBrowser(browsers[idx]);
       try {
         browsers[idx] = await launchBrowser();
       } catch (err) {
@@ -358,6 +355,6 @@ async function _runAudit(session, onUpdate) {
     });
 
   } finally {
-    await Promise.all(browsers.map(b => b?.close().catch(() => {})));
+    await Promise.all(browsers.map(b => closeBrowser(b)));
   }
 }

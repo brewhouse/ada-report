@@ -497,47 +497,65 @@ function extractElements(audit) {
   }).filter(Boolean);
 }
 
+// Force-kill a browser's underlying OS process, then close via CDP.
+// browser.close() alone silently fails when Chrome has already crashed,
+// leaving a zombie process that accumulates and eventually exhausts Render's
+// process limit. Always SIGKILL first so the OS reclaims the process.
+export async function closeBrowser(browser) {
+  if (!browser) return;
+  try { browser.process()?.kill('SIGKILL'); } catch {}
+  await browser.close().catch(() => {});
+}
+
+const CHROME_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-first-run',
+  '--disable-extensions',
+  '--disable-default-apps',
+  '--disable-sync',
+  '--disable-translate',
+  '--hide-scrollbars',
+  '--metrics-recording-only',
+  '--mute-audio',
+  '--safebrowsing-disable-auto-update',
+  '--no-zygote',
+  '--disable-crash-reporter',
+];
+
 export async function launchBrowser() {
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH ||
     process.env.CHROME_PATH || undefined;
 
-  let timeoutHandle;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutHandle = setTimeout(
-      () => reject(new Error('Browser launch timed out after 60 seconds')),
-      60_000
-    );
-  });
-
-  try {
-    const browser = await Promise.race([
-      puppeteer.launch({
-        headless: 'new',
-        executablePath,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--no-first-run',
-          '--disable-extensions',
-          '--disable-default-apps',
-          '--disable-sync',
-          '--disable-translate',
-          '--hide-scrollbars',
-          '--metrics-recording-only',
-          '--mute-audio',
-          '--safebrowsing-disable-auto-update',
-          '--no-zygote',
-          '--disable-crash-reporter',
-        ],
-      }),
-      timeoutPromise,
-    ]);
-    return browser;
-  } finally {
-    clearTimeout(timeoutHandle);
+  const MAX_ATTEMPTS = 3;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error('Browser launch timed out after 30 seconds')),
+        30_000
+      );
+    });
+    try {
+      const browser = await Promise.race([
+        puppeteer.launch({ headless: 'new', executablePath, args: CHROME_ARGS }),
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutHandle);
+      return browser;
+    } catch (err) {
+      clearTimeout(timeoutHandle);
+      lastErr = err;
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`[browser] Launch attempt ${attempt}/${MAX_ATTEMPTS} failed: ${err.message} — retrying in ${attempt * 2}s`);
+        await new Promise(r => setTimeout(r, attempt * 2000));
+      }
+    }
   }
+  throw lastErr;
 }
 
 // Hard cap per page so a hung Chrome (e.g. OOM-killed while another audit starts)
