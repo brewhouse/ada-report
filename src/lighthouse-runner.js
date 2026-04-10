@@ -497,13 +497,27 @@ function extractElements(audit) {
   }).filter(Boolean);
 }
 
-// Force-kill a browser's underlying OS process, then close via CDP.
-// browser.close() alone silently fails when Chrome has already crashed,
-// leaving a zombie process that accumulates and eventually exhausts Render's
-// process limit. Always SIGKILL first so the OS reclaims the process.
+// Force-kill a browser and ALL its child processes, then close via CDP.
+//
+// On Linux (Render), SIGKILL on the parent Chrome process only kills that
+// one process — its renderer, network-service, and GPU helper child processes
+// become orphaned and keep running. They accumulate across audits until the
+// container's process limit is hit, causing all subsequent launches to fail.
+//
+// Chrome on Linux calls setpgid(0,0) to create its own process group, so
+// process.kill(-pid, 'SIGKILL') kills the entire group atomically.
+// On other platforms (macOS dev), fall back to killing just the parent.
 export async function closeBrowser(browser) {
   if (!browser) return;
-  try { browser.process()?.kill('SIGKILL'); } catch {}
+  const pid = browser.process()?.pid;
+  if (pid) {
+    if (process.platform === 'linux') {
+      // Kill the entire Chrome process group (renderer + network + GPU children)
+      try { process.kill(-pid, 'SIGKILL'); } catch {}
+    } else {
+      try { process.kill(pid, 'SIGKILL'); } catch {}
+    }
+  }
   await browser.close().catch(() => {});
 }
 
@@ -523,6 +537,12 @@ const CHROME_ARGS = [
   '--safebrowsing-disable-auto-update',
   '--no-zygote',
   '--disable-crash-reporter',
+  // Reduce child process count per Chrome instance on Linux/Render:
+  // site-per-process spawns a renderer per origin — disable it so all
+  // content shares one renderer process instead of many.
+  '--disable-features=site-per-process',
+  // Cap renderer processes to 1 per browser instance.
+  '--renderer-process-limit=1',
 ];
 
 export async function launchBrowser() {
