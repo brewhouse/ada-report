@@ -1,6 +1,6 @@
 import puppeteer from 'puppeteer';
 import lighthouse from 'lighthouse';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { createRequire } from 'module';
 import { extractLabelsFn } from './consistency-checker.js';
 
@@ -497,23 +497,53 @@ function extractElements(audit) {
   }).filter(Boolean);
 }
 
-// Force-kill a browser and ALL its child processes, then close via CDP.
+// Recursively collect all descendant PIDs of a process by reading /proc.
+// On Linux, Chrome spawns renderer/network/GPU helper child processes that
+// become orphaned when only the parent is killed. This walks the full tree.
+function collectDescendants(rootPid) {
+  const descendants = [];
+  try {
+    // Build a ppid→[children] map from /proc
+    const allPids = readdirSync('/proc').filter(f => /^\d+$/.test(f)).map(Number);
+    const childMap = new Map();
+    for (const pid of allPids) {
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+        // stat format: pid (comm) state ppid ...
+        const ppid = parseInt(stat.split(')')[1].trim().split(' ')[1]);
+        if (!childMap.has(ppid)) childMap.set(ppid, []);
+        childMap.get(ppid).push(pid);
+      } catch {}
+    }
+    // BFS from rootPid
+    const queue = [rootPid];
+    while (queue.length) {
+      const pid = queue.shift();
+      descendants.push(pid);
+      for (const child of (childMap.get(pid) || [])) queue.push(child);
+    }
+  } catch {}
+  return descendants;
+}
+
+// Force-kill a browser and ALL its descendant processes, then close via CDP.
 //
-// On Linux (Render), SIGKILL on the parent Chrome process only kills that
-// one process — its renderer, network-service, and GPU helper child processes
-// become orphaned and keep running. They accumulate across audits until the
-// container's process limit is hit, causing all subsequent launches to fail.
+// On Linux (Render), killing only the Chrome parent leaves renderer,
+// network-service, and GPU helper children as orphans — they accumulate
+// across audits until the container process limit is hit.
 //
-// Chrome on Linux calls setpgid(0,0) to create its own process group, so
-// process.kill(-pid, 'SIGKILL') kills the entire group atomically.
-// On other platforms (macOS dev), fall back to killing just the parent.
+// We walk /proc to find every descendant of the Chrome PID and SIGKILL
+// them all (children first, parent last) before calling browser.close().
 export async function closeBrowser(browser) {
   if (!browser) return;
   const pid = browser.process()?.pid;
   if (pid) {
     if (process.platform === 'linux') {
-      // Kill the entire Chrome process group (renderer + network + GPU children)
-      try { process.kill(-pid, 'SIGKILL'); } catch {}
+      const pids = collectDescendants(pid);
+      // Kill children before parent so they can't be re-spawned
+      for (const p of pids.reverse()) {
+        try { process.kill(p, 'SIGKILL'); } catch {}
+      }
     } else {
       try { process.kill(pid, 'SIGKILL'); } catch {}
     }
