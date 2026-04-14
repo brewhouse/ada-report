@@ -8,7 +8,8 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
-import { startAudit, rescanPage, forceReleaseGlobalSlot } from './src/audit-manager.js';
+import { startAudit, rescanPage, forceReleaseGlobalSlot, getGlobalAuditCount } from './src/audit-manager.js';
+import { killAllChrome, countChromeProcesses } from './src/lighthouse-runner.js';
 import { generateReport, generateSummaryReport, generateVpatReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
 import {
@@ -883,6 +884,92 @@ app.get('/api/reports/:filename', async (req, res) => {
   }
 });
 
+// ── System status & reset ──────────────────────────────────────────────────────
+
+// GET /api/system-status — full diagnostic snapshot: queue, active audits,
+// Chrome process count, semaphore state, uptime.
+app.get('/api/system-status', (_req, res) => {
+  const now = Date.now();
+  const active = [...auditSessions.values()]
+    .filter(s => s.status === 'auditing' || s.status === 'crawling')
+    .map(s => ({
+      id:          s.id,
+      url:         s.url,
+      status:      s.status,
+      startTime:   s.startTime,
+      currentPage: s.currentPage || null,
+      progress:    s.progress || null,
+      ageMs:       s.startTime ? now - new Date(s.startTime).getTime() : null,
+    }));
+
+  const queued = auditQueue.map(({ session }) => ({
+    id:        session.id,
+    url:       session.url,
+    startTime: session.startTime,
+    ageMs:     session.startTime ? now - new Date(session.startTime).getTime() : null,
+  }));
+
+  res.json({
+    timestamp:        new Date().toISOString(),
+    uptimeSeconds:    Math.floor(process.uptime()),
+    chromeProcesses:  countChromeProcesses(),
+    semaphoreSlots:   getGlobalAuditCount(),
+    runningAudits,
+    maxConcurrent:    MAX_CONCURRENT_AUDITS,
+    queueLength:      auditQueue.length,
+    active,
+    queued,
+    totalSessionsInMemory: auditSessions.size,
+  });
+});
+
+// POST /api/system-reset — kill all Chrome processes, drain the queue, and
+// release any stuck semaphore slots.  Does NOT restart the process — just
+// clears the stuck state so new audits can launch immediately.
+app.post('/api/system-reset', (_req, res) => {
+  // 1. Kill every Chrome process
+  killAllChrome();
+
+  // 2. Cancel all queued (not yet started) audits
+  const cancelledQueue = [];
+  while (auditQueue.length > 0) {
+    const { session } = auditQueue.shift();
+    session.status  = 'error';
+    session.error   = 'Cancelled — system was reset';
+    session.endTime = new Date().toISOString();
+    broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    cancelledQueue.push(session.id);
+  }
+
+  // 3. Mark any stuck active audits as error
+  const cancelledActive = [];
+  for (const session of auditSessions.values()) {
+    if (session.status === 'auditing' || session.status === 'crawling') {
+      session._cancelledExternally = true;
+      session.status  = 'error';
+      session.error   = 'Cancelled — system was reset';
+      session.endTime = new Date().toISOString();
+      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+      cancelledActive.push(session.id);
+    }
+  }
+
+  // 4. Reset the running-audits counter and drain the semaphore
+  runningAudits = 0;
+  const slotsHeld = getGlobalAuditCount();
+  for (let i = 0; i < slotsHeld; i++) forceReleaseGlobalSlot();
+
+  console.log(`[system-reset] Chrome killed, ${cancelledQueue.length} queued + ${cancelledActive.length} active audits cancelled, ${slotsHeld} semaphore slot(s) released`);
+
+  res.json({
+    success: true,
+    chromeKilled:     true,
+    cancelledQueue,
+    cancelledActive,
+    slotsReleased:    slotsHeld,
+  });
+});
+
 // Queue management
 app.get('/api/queue', (_req, res) => {
   res.json({
@@ -1048,6 +1135,10 @@ app.post('/api/scheduler/schedules/import', schedulerAuth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/status', (_req, res) => {
+  res.sendFile(join(__dirname, 'public', 'status.html'));
 });
 
 app.get('*', (_req, res) => {

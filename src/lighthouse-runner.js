@@ -497,6 +497,23 @@ function extractElements(audit) {
   }).filter(Boolean);
 }
 
+// Count live Chrome/Chromium processes without killing them.
+// Used by the /api/system-status endpoint. Returns 0 on non-Linux.
+export function countChromeProcesses() {
+  if (process.platform !== 'linux') return 0;
+  let count = 0;
+  try {
+    const allPids = readdirSync('/proc').filter(f => /^\d+$/.test(f));
+    for (const pid of allPids) {
+      try {
+        const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+        if (/^(chrome|chromium|chrome-sandbox|chrome_crashpad)/.test(comm)) count++;
+      } catch {}
+    }
+  } catch {}
+  return count;
+}
+
 // Kill every Chrome/Chromium process in the container before launching a new
 // browser pool.  Called at the start of each audit so stray processes from
 // previous (possibly crashed) audits can't exhaust the Render process limit.

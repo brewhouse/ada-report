@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>System Status — Inquiros ADA Checker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #1e293b; font-size: 14px; }
+
+    .site-header { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 0 24px; height: 52px; display: flex; align-items: center; gap: 16px; }
+    .site-header a { display: flex; align-items: center; }
+    .logo-img { height: 26px; }
+    .site-header h1 { font-size: 15px; font-weight: 600; color: #1e293b; letter-spacing: -.2px; }
+    .back-link { font-size: 13px; color: #3b82f6; text-decoration: none; margin-left: auto; }
+    .back-link:hover { text-decoration: underline; }
+
+    .page { max-width: 900px; margin: 0 auto; padding: 28px 20px 60px; }
+
+    .refresh-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .refresh-bar .ts { font-size: 12px; color: #64748b; }
+    .refresh-bar .auto-label { font-size: 12px; color: #64748b; margin-left: auto; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; border: none; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-blue  { background: #3b82f6; color: #fff; }
+    .btn-blue:hover:not(:disabled)  { background: #2563eb; }
+    .btn-red   { background: #ef4444; color: #fff; }
+    .btn-red:hover:not(:disabled)   { background: #dc2626; }
+    .btn-slate { background: #e2e8f0; color: #475569; }
+    .btn-slate:hover:not(:disabled) { background: #cbd5e1; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 18px; }
+    .card-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: #94a3b8; margin-bottom: 6px; }
+    .card-value { font-size: 28px; font-weight: 700; color: #1e293b; line-height: 1; }
+    .card-value.warn { color: #f59e0b; }
+    .card-value.danger { color: #ef4444; }
+    .card-value.ok { color: #22c55e; }
+
+    .section { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+    .section-head { padding: 12px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px; }
+    .section-head h2 { font-size: 13px; font-weight: 700; color: #1e293b; }
+    .badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 20px; }
+    .badge-blue  { background: #dbeafe; color: #1d4ed8; }
+    .badge-amber { background: #fef3c7; color: #92400e; }
+    .badge-red   { background: #fee2e2; color: #991b1b; }
+    .badge-slate { background: #f1f5f9; color: #475569; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: #64748b; padding: 10px 18px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+    td { padding: 10px 18px; font-size: 13px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .url-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 12px; color: #475569; }
+    .status-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
+    .pill-auditing { background: #dbeafe; color: #1d4ed8; }
+    .pill-crawling  { background: #f0fdf4; color: #15803d; }
+    .pill-queued   { background: #f1f5f9; color: #475569; }
+    .pill-error    { background: #fee2e2; color: #991b1b; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
+    .pill-auditing .dot, .pill-crawling .dot { animation: pulse 1.4s ease-in-out infinite; }
+    .age-cell { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+    .cancel-btn { font-size: 12px; font-weight: 600; color: #dc2626; background: #fee2e2; border: none; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+    .cancel-btn:hover { background: #fecaca; }
+    .empty-row td { text-align: center; color: #94a3b8; font-size: 13px; padding: 20px; }
+
+    .reset-box { background: #fff; border: 1px solid #fca5a5; border-radius: 10px; padding: 18px 20px; margin-bottom: 24px; display: flex; align-items: flex-start; gap: 14px; }
+    .reset-box-icon { font-size: 22px; flex-shrink: 0; margin-top: 1px; }
+    .reset-box-body h3 { font-size: 14px; font-weight: 700; color: #991b1b; margin-bottom: 4px; }
+    .reset-box-body p { font-size: 13px; color: #64748b; line-height: 1.5; margin-bottom: 12px; }
+    .reset-result { font-size: 12px; color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 8px 12px; margin-top: 10px; display: none; }
+    .reset-result.visible { display: block; }
+
+    .uptime-bar { font-size: 12px; color: #64748b; padding: 10px 18px; border-top: 1px solid #f1f5f9; }
+  </style>
+</head>
+<body>
+
+<header class="site-header">
+  <a href="https://www.planeteria.com/" target="_blank" rel="noopener">
+    <img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria Logo" class="logo-img">
+  </a>
+  <h1>System Status</h1>
+  <a href="/" class="back-link">← Back to audits</a>
+</header>
+
+<div class="page">
+
+  <div class="refresh-bar">
+    <button class="btn btn-slate" id="btn-refresh">↻ Refresh</button>
+    <span class="ts" id="last-updated">—</span>
+    <label class="auto-label">
+      <input type="checkbox" id="auto-refresh" checked style="margin-right:5px">
+      Auto-refresh every 10 s
+    </label>
+  </div>
+
+  <!-- Metric cards -->
+  <div class="grid" id="cards">
+    <div class="card"><div class="card-label">Chrome Processes</div><div class="card-value" id="m-chrome">—</div></div>
+    <div class="card"><div class="card-label">Running Audits</div><div class="card-value" id="m-running">—</div></div>
+    <div class="card"><div class="card-label">Queued Audits</div><div class="card-value" id="m-queued">—</div></div>
+    <div class="card"><div class="card-label">Semaphore Slots</div><div class="card-value" id="m-semaphore">—</div></div>
+    <div class="card"><div class="card-label">Sessions in Memory</div><div class="card-value" id="m-sessions">—</div></div>
+    <div class="card"><div class="card-label">Uptime</div><div class="card-value" id="m-uptime" style="font-size:18px;padding-top:4px">—</div></div>
+  </div>
+
+  <!-- Reset -->
+  <div class="reset-box">
+    <div class="reset-box-icon">⚠️</div>
+    <div class="reset-box-body">
+      <h3>Emergency Reset</h3>
+      <p>Kills all Chrome/Chromium processes, cancels every queued and active audit, and releases stuck semaphore slots. Use this when audits are frozen or browsers won't launch. The server process itself is <strong>not</strong> restarted.</p>
+      <button class="btn btn-red" id="btn-reset">Reset System</button>
+      <div class="reset-result" id="reset-result"></div>
+    </div>
+  </div>
+
+  <!-- Active audits -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Active Audits</h2>
+      <span class="badge badge-blue" id="active-count">0</span>
+    </div>
+    <table>
+      <thead><tr><th>URL</th><th>Status</th><th>Current Page</th><th>Progress</th><th>Age</th><th></th></tr></thead>
+      <tbody id="active-body"><tr class="empty-row"><td colspan="6">No active audits</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Queued audits -->
+  <div class="section">
+    <div class="section-head">
+      <h2>Queued Audits</h2>
+      <span class="badge badge-amber" id="queued-count">0</span>
+    </div>
+    <table>
+      <thead><tr><th>URL</th><th>Age</th><th></th></tr></thead>
+      <tbody id="queued-body"><tr class="empty-row"><td colspan="3">Queue is empty</td></tr></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+  let autoTimer = null;
+
+  function fmtAge(ms) {
+    if (ms == null) return '—';
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60), rs = s % 60;
+    if (m < 60) return `${m}m ${rs}s`;
+    return `${Math.floor(m/60)}h ${m%60}m`;
+  }
+
+  function fmtUptime(s) {
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60), rm = m % 60;
+    if (h < 24) return `${h}h ${rm}m`;
+    return `${Math.floor(h/24)}d ${h%24}h`;
+  }
+
+  function colorVal(el, val, warnAbove, dangerAbove) {
+    el.textContent = val;
+    el.className = 'card-value';
+    if (dangerAbove != null && val > dangerAbove) el.classList.add('danger');
+    else if (warnAbove != null && val > warnAbove) el.classList.add('warn');
+    else if (val === 0) el.classList.add('ok');
+  }
+
+  async function load() {
+    try {
+      const r = await fetch('/api/system-status');
+      const d = await r.json();
+
+      document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+      colorVal(document.getElementById('m-chrome'),    d.chromeProcesses, 8, 20);
+      colorVal(document.getElementById('m-running'),   d.runningAudits, d.maxConcurrent - 1, d.maxConcurrent);
+      colorVal(document.getElementById('m-queued'),    d.queueLength, 3, 8);
+      colorVal(document.getElementById('m-semaphore'), d.semaphoreSlots, 2, 3);
+      colorVal(document.getElementById('m-sessions'),  d.totalSessionsInMemory, 50, 90);
+      document.getElementById('m-uptime').textContent = fmtUptime(d.uptimeSeconds);
+
+      // Active table
+      const ab = document.getElementById('active-body');
+      document.getElementById('active-count').textContent = d.active.length;
+      if (d.active.length === 0) {
+        ab.innerHTML = '<tr class="empty-row"><td colspan="6">No active audits</td></tr>';
+      } else {
+        ab.innerHTML = d.active.map(a => {
+          const prog = a.progress ? `${a.progress.audited}/${a.progress.total}` : '—';
+          const cur = a.currentPage ? a.currentPage.replace(/^https?:\/\/[^/]+/, '') || '/' : '—';
+          const pillCls = a.status === 'crawling' ? 'pill-crawling' : 'pill-auditing';
+          return `<tr>
+            <td class="url-cell" title="${a.url}">${a.url}</td>
+            <td><span class="status-pill ${pillCls}"><span class="dot"></span>${a.status}</span></td>
+            <td class="url-cell" title="${a.currentPage || ''}" style="max-width:200px">${cur}</td>
+            <td style="font-size:12px;color:#475569">${prog}</td>
+            <td class="age-cell">${fmtAge(a.ageMs)}</td>
+            <td><button class="cancel-btn" onclick="cancelAudit('${a.id}')">Cancel</button></td>
+          </tr>`;
+        }).join('');
+      }
+
+      // Queued table
+      const qb = document.getElementById('queued-body');
+      document.getElementById('queued-count').textContent = d.queued.length;
+      if (d.queued.length === 0) {
+        qb.innerHTML = '<tr class="empty-row"><td colspan="3">Queue is empty</td></tr>';
+      } else {
+        qb.innerHTML = d.queued.map(q => `<tr>
+          <td class="url-cell" title="${q.url}">${q.url}</td>
+          <td class="age-cell">${fmtAge(q.ageMs)}</td>
+          <td><button class="cancel-btn" onclick="cancelAudit('${q.id}')">Cancel</button></td>
+        </tr>`).join('');
+      }
+    } catch (e) {
+      document.getElementById('last-updated').textContent = 'Error: ' + e.message;
+    }
+  }
+
+  async function cancelAudit(id) {
+    if (!confirm('Cancel this audit?')) return;
+    await fetch(`/api/audit/${id}`, { method: 'DELETE' });
+    await load();
+  }
+
+  document.getElementById('btn-refresh').addEventListener('click', load);
+
+  document.getElementById('auto-refresh').addEventListener('change', function() {
+    clearInterval(autoTimer);
+    if (this.checked) autoTimer = setInterval(load, 10000);
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', async () => {
+    if (!confirm('This will kill all Chrome processes and cancel every active/queued audit. Continue?')) return;
+    const btn = document.getElementById('btn-reset');
+    btn.disabled = true;
+    btn.textContent = 'Resetting…';
+    try {
+      const r = await fetch('/api/system-reset', { method: 'POST' });
+      const d = await r.json();
+      const el = document.getElementById('reset-result');
+      el.textContent = `Done — ${d.chromeKilled ? 'Chrome killed' : ''}, ${d.cancelledActive.length} active + ${d.cancelledQueue.length} queued audits cancelled, ${d.slotsReleased} semaphore slot(s) released.`;
+      el.classList.add('visible');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Reset System';
+      await load();
+    }
+  });
+
+  // Initial load + auto-refresh
+  load();
+  autoTimer = setInterval(load, 10000);
+</script>
+</body>
+</html>

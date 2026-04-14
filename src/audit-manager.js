@@ -129,6 +129,11 @@ export function forceReleaseGlobalSlot() {
   if (_globalAuditCount > 0) _releaseGlobalSlot();
 }
 
+// Return the current number of held global audit slots (for diagnostics).
+export function getGlobalAuditCount() {
+  return _globalAuditCount;
+}
+
 // Number of pages to audit in parallel within a single audit (each page = one browser).
 // 4 pages × up to 3 simultaneous audits = 12 Chrome instances max on Render (8 CPU).
 const CONCURRENT_PAGES = 4;
