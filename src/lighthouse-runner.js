@@ -497,39 +497,51 @@ function extractElements(audit) {
   }).filter(Boolean);
 }
 
-// Count live Chrome/Chromium processes without killing them.
-// Used by the /api/system-status endpoint. Returns 0 on non-Linux.
+// On Render, /proc shows ALL processes on the shared host kernel — thousands
+// of PIDs from other tenants' containers.  We can only see/kill processes
+// owned by our own UID, so filter by Uid before doing anything.
+const MY_UID = process.platform === 'linux' ? process.getuid() : -1;
+
+function isOwnedByUs(pid) {
+  try {
+    const status = readFileSync(`/proc/${pid}/status`, 'utf8');
+    const line = status.split('\n').find(l => l.startsWith('Uid:'));
+    if (!line) return false;
+    return parseInt(line.split(/\s+/)[1]) === MY_UID;
+  } catch { return false; }
+}
+
+function isChrome(pid) {
+  try {
+    const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+    return /^(chrome|chromium|chrome-sandbox|chrome_crashpad)/.test(comm);
+  } catch { return false; }
+}
+
+// Count Chrome/Chromium processes we own. Returns 0 on non-Linux.
 export function countChromeProcesses() {
   if (process.platform !== 'linux') return 0;
   let count = 0;
   try {
-    const allPids = readdirSync('/proc').filter(f => /^\d+$/.test(f));
-    for (const pid of allPids) {
-      try {
-        const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
-        if (/^(chrome|chromium|chrome-sandbox|chrome_crashpad)/.test(comm)) count++;
-      } catch {}
+    for (const f of readdirSync('/proc')) {
+      if (!/^\d+$/.test(f)) continue;
+      const pid = Number(f);
+      if (isOwnedByUs(pid) && isChrome(pid)) count++;
     }
   } catch {}
   return count;
 }
 
-// Kill every Chrome/Chromium process in the container before launching a new
-// browser pool.  Called at the start of each audit so stray processes from
-// previous (possibly crashed) audits can't exhaust the Render process limit.
-// On non-Linux platforms this is a no-op — dev machines manage Chrome fine.
+// Kill every Chrome/Chromium process we own before launching a new browser pool.
 export function killAllChrome() {
   if (process.platform !== 'linux') return;
   try {
     const allPids = readdirSync('/proc').filter(f => /^\d+$/.test(f)).map(Number);
     let killed = 0;
     for (const pid of allPids) {
-      try {
-        const comm = readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
-        if (/^(chrome|chromium|chrome-sandbox|chrome_crashpad)/.test(comm)) {
-          try { process.kill(pid, 'SIGKILL'); killed++; } catch {}
-        }
-      } catch {}
+      if (isOwnedByUs(pid) && isChrome(pid)) {
+        try { process.kill(pid, 'SIGKILL'); killed++; } catch {}
+      }
     }
     if (killed > 0) console.log(`[browser] Pre-launch cleanup: killed ${killed} stray Chrome process(es)`);
   } catch {}
