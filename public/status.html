@@ -185,7 +185,7 @@
       colorVal(document.getElementById('m-running'),   d.runningAudits, d.maxConcurrent - 1, d.maxConcurrent);
       colorVal(document.getElementById('m-queued'),    d.queueLength, 3, 8);
       colorVal(document.getElementById('m-semaphore'), d.semaphoreSlots, 2, 3);
-      colorVal(document.getElementById('m-sessions'),  d.totalSessionsInMemory, 50, 90);
+      colorVal(document.getElementById('m-sessions'),  d.totalSessionsInMemory, 500, 900);
       document.getElementById('m-uptime').textContent = fmtUptime(d.uptimeSeconds);
 
       // Active table
@@ -248,7 +248,7 @@
       const r = await fetch('/api/system-reset', { method: 'POST' });
       const d = await r.json();
       const el = document.getElementById('reset-result');
-      el.textContent = `Done — ${d.chromeKilled ? 'Chrome killed' : ''}, ${d.cancelledActive.length} active + ${d.cancelledQueue.length} queued audits cancelled, ${d.slotsReleased} semaphore slot(s) released.`;
+      el.textContent = `Done — Chrome killed, ${d.cancelledActive.length} active + ${d.cancelledQueue.length} queued audits cancelled, ${d.slotsReleased} semaphore slot(s) released, ${d.sessionsEvicted} sessions cleared from memory.`;
       el.classList.add('visible');
     } finally {
       btn.disabled = false;

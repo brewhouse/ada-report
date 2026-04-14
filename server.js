@@ -959,7 +959,17 @@ app.post('/api/system-reset', (_req, res) => {
   const slotsHeld = getGlobalAuditCount();
   for (let i = 0; i < slotsHeld; i++) forceReleaseGlobalSlot();
 
-  console.log(`[system-reset] Chrome killed, ${cancelledQueue.length} queued + ${cancelledActive.length} active audits cancelled, ${slotsHeld} semaphore slot(s) released`);
+  // 5. Evict all completed/error sessions from memory — they're persisted in
+  //    MySQL so nothing is lost. Keeps memory lean and the status count honest.
+  let evicted = 0;
+  for (const [id, s] of auditSessions) {
+    if (s.status === 'completed' || s.status === 'error') {
+      auditSessions.delete(id);
+      evicted++;
+    }
+  }
+
+  console.log(`[system-reset] Chrome killed, ${cancelledQueue.length} queued + ${cancelledActive.length} active audits cancelled, ${slotsHeld} semaphore slot(s) released, ${evicted} sessions evicted from memory`);
 
   res.json({
     success: true,
@@ -967,6 +977,7 @@ app.post('/api/system-reset', (_req, res) => {
     cancelledQueue,
     cancelledActive,
     slotsReleased:    slotsHeld,
+    sessionsEvicted:  evicted,
   });
 });
 
