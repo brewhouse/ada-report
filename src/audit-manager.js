@@ -211,9 +211,12 @@ async function _runAudit(session, onUpdate) {
   });
 
   // Phase 2: Launch a pool of browsers for parallel auditing.
-  // Kill any stray Chrome processes first — previous crashed/timed-out audits
-  // may leave orphans that exhaust the container process limit on Render.
-  killAllChrome();
+  // Kill stray Chrome from a previous crashed run only when this is the sole
+  // running audit — calling killAllChrome() with concurrent audits active would
+  // kill their live browsers and cause cascading failures.
+  if (_globalAuditCount === 1) {
+    killAllChrome();
+  }
   // Launch sequentially with a short stagger so Chrome instances don't all
   // compete for OS resources simultaneously (causes fork failures on Render).
   const concurrency = Math.min(CONCURRENT_PAGES, pages.length);
@@ -251,10 +254,13 @@ async function _runAudit(session, onUpdate) {
     // Called whenever a page error/timeout leaves Chrome in a bad state.
     async function replaceBrowser(idx) {
       await closeBrowser(browsers[idx]);
+      browsers[idx] = null; // Mark slot unavailable before attempting restart
       try {
         browsers[idx] = await launchBrowser();
       } catch (err) {
         console.warn(`[audit] Browser restart failed for worker ${idx}: ${err.message}`);
+        // browsers[idx] stays null — worker detects this and errors pages cleanly
+        // instead of looping against a dead Chrome process
       }
     }
 
@@ -270,34 +276,46 @@ async function _runAudit(session, onUpdate) {
         const MAX_ATTEMPTS = 3;
         let pageResult;
         let lastError;
-        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-          try {
-            pageResult = await runLighthouseAudit(pageUrl, browsers[workerIdx], { wcag22: !!session.wcag22 });
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error;
-            console.warn(`[audit] Page error (attempt ${attempt}/${MAX_ATTEMPTS}) — ${pageUrl}: ${error.message}`);
-            if (attempt < MAX_ATTEMPTS) {
-              // Don't retry errors caused by the page itself (HTTP errors, bad redirects, DNS).
-              if (isNonRetryableError(error)) break;
-              // Lighthouse internal mark errors mean Chrome is in a bad state —
-              // replace the browser before retrying so the next attempt gets a
-              // clean instance. Cap at 20 s so a failed restart doesn't stall.
-              if (requiresBrowserReplace(error)) {
-                await Promise.race([replaceBrowser(workerIdx), new Promise(r => setTimeout(r, 20_000))]);
+
+        // If this worker's browser slot is null (a prior restart failed), skip
+        // the retry loop entirely — attempting runLighthouseAudit against a null
+        // browser hammers Chrome with 3× 30 s launch timeouts per page.
+        if (!browsers[workerIdx]) {
+          lastError = new Error('Browser unavailable — Chrome could not be restarted');
+        } else {
+          for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+              pageResult = await runLighthouseAudit(pageUrl, browsers[workerIdx], { wcag22: !!session.wcag22 });
+              lastError = null;
+              break;
+            } catch (error) {
+              lastError = error;
+              console.warn(`[audit] Page error (attempt ${attempt}/${MAX_ATTEMPTS}) — ${pageUrl}: ${error.message}`);
+              if (attempt < MAX_ATTEMPTS) {
+                // Don't retry errors caused by the page itself (HTTP errors, bad redirects, DNS).
+                if (isNonRetryableError(error)) break;
+                // Lighthouse internal mark errors mean Chrome is in a bad state —
+                // replace the browser before retrying so the next attempt gets a
+                // clean instance. Cap at 20 s so a failed restart doesn't stall.
+                if (requiresBrowserReplace(error)) {
+                  await Promise.race([replaceBrowser(workerIdx), new Promise(r => setTimeout(r, 20_000))]);
+                }
+                // Progressive back-off: 5 s after attempt 1, 10 s after attempt 2.
+                await new Promise(r => setTimeout(r, attempt * 5000));
               }
-              // Progressive back-off: 5 s after attempt 1, 10 s after attempt 2.
-              await new Promise(r => setTimeout(r, attempt * 5000));
             }
           }
         }
 
-        // After both attempts failed, replace the browser so the NEXT page
+        // After all attempts failed, replace the browser so the NEXT page
         // gets a clean Chrome instance. Cap at 20 s so a slow/failed restart
         // never stalls the entire audit — the worker carries on regardless.
+        // Only attempt replacement if the slot isn't already null (restart was
+        // already tried and failed — don't hammer Chrome again).
         if (lastError) {
-          await Promise.race([replaceBrowser(workerIdx), new Promise(r => setTimeout(r, 20_000))]);
+          if (browsers[workerIdx]) {
+            await Promise.race([replaceBrowser(workerIdx), new Promise(r => setTimeout(r, 20_000))]);
+          }
           pageResult = {
             url: pageUrl,
             status: 'error',
