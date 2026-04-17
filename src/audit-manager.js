@@ -72,7 +72,22 @@ async function checkUrlStatus(url) {
 // Re-audit a single URL and return the updated page result.
 // Used by the /rescan endpoint to retry a previously errored page.
 export async function rescanPage(url, opts = {}) {
-  const browser = await launchBrowser();
+  // Quick HTTP check before launching Chrome — avoids a full browser session
+  // for pages that are 404, permanently redirected, or access-denied.
+  const urlStatus = await checkUrlStatus(url);
+  if (urlStatus !== 'ok') {
+    const reason = urlStatus === 'not-found' ? 'Page returned 404 or 410 — it no longer exists'
+                 : urlStatus === 'redirect'  ? 'Page redirects to a different URL'
+                 : urlStatus === 'forbidden' ? 'Page returned 403 Forbidden'
+                 : `Page is not auditable (${urlStatus})`;
+    return {
+      url, status: 'error', error: reason,
+      score: null, issues: [], issueCount: 0,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  let browser = await launchBrowser();
   try {
     let pageResult;
     let lastError;
@@ -85,6 +100,17 @@ export async function rescanPage(url, opts = {}) {
         lastError = error;
         if (attempt < 3) {
           if (isNonRetryableError(error)) break;
+          // Chrome is in a bad state — close and relaunch before retrying.
+          if (requiresBrowserReplace(error)) {
+            await closeBrowser(browser);
+            browser = null;
+            try {
+              browser = await launchBrowser();
+            } catch (launchErr) {
+              lastError = launchErr;
+              break; // Can't recover — give up
+            }
+          }
           await new Promise(r => setTimeout(r, attempt * 5000));
         }
       }

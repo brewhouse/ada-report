@@ -394,13 +394,31 @@ async function processAuditQueue() {
 // Runs after an audit completes to retry pages that errored (timeout/crash).
 // Uses 'page-update' WS messages so the client updates individual rows in the
 // page list without re-rendering the entire results view.
+// Errors that won't improve with a retry — page-specific failures unrelated to
+// Chrome state.  Matches the same patterns as isNonRetryableError() plus the
+// "fully rendered" / login messages Lighthouse emits.
+function isKnownNonRetryableMsg(msg) {
+  if (!msg) return false;
+  return (
+    /\bstatus.?code\s+[45]\d\d\b/i.test(msg) ||
+    /too many redirects|ERR_TOO_MANY_REDIRECTS/i.test(msg) ||
+    /ERR_NAME_NOT_RESOLVED/i.test(msg) ||
+    /404|410|not.*exist/i.test(msg) ||
+    /403 Forbidden/i.test(msg) ||
+    /redirects to a different URL/i.test(msg) ||
+    /not.*fully.*rendered|requires login/i.test(msg)
+  );
+}
+
 async function autoRescanErrorPages(sessionId, wcag22) {
-  // Give the client ~2 s to finish rendering the completed results before we
+  // Give the client ~3 s to finish rendering the completed results before we
   // start sending page-update messages (avoids racing with loadExistingAudit).
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, 3000));
 
   const session = auditSessions.get(sessionId);
-  const CONCURRENT  = 3; // pages rescanned in parallel per batch
+  // Run rescans one at a time — each rescanPage launches its own Chrome browser,
+  // and concurrent launches right after an audit competes for the same resources.
+  const CONCURRENT  = 1;
   const MAX_PASSES  = 2; // maximum retry passes
 
   for (let pass = 1; pass <= MAX_PASSES; pass++) {
@@ -409,7 +427,11 @@ async function autoRescanErrorPages(sessionId, wcag22) {
     // Load current page statuses from DB to find remaining error pages.
     const full = await getFullSession(sessionId).catch(() => null);
     if (!full) break;
-    const errorPages = full.pages.filter(p => p.status === 'error');
+    // Skip pages whose errors are known to be non-retryable (404, DNS failure,
+    // login wall, etc.) — launching Chrome for these is always wasted work.
+    const errorPages = full.pages.filter(p =>
+      p.status === 'error' && !isKnownNonRetryableMsg(p.error)
+    );
     if (errorPages.length === 0) break;
 
     console.log(`[auto-rescan] Pass ${pass}/${MAX_PASSES}: ${errorPages.length} page(s) — ${sessionId}`);
