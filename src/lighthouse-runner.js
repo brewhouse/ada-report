@@ -635,8 +635,8 @@ export async function launchBrowser() {
     let timeoutHandle;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(
-        () => reject(new Error('Browser launch timed out after 30 seconds')),
-        30_000
+        () => reject(new Error('Browser launch timed out after 60 seconds')),
+        60_000
       );
     });
     try {

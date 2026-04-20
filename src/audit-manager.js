@@ -135,7 +135,7 @@ export async function rescanPage(url, opts = {}) {
 // Global semaphore — caps total concurrent audits regardless of code path
 // (manual queue + scheduled triggers combined).
 let _globalAuditCount = 0;
-const _MAX_GLOBAL_AUDITS = 3;
+const _MAX_GLOBAL_AUDITS = 2;
 const _globalWaiters = [];
 
 function _acquireGlobalSlot() {
@@ -161,8 +161,10 @@ export function getGlobalAuditCount() {
 }
 
 // Number of pages to audit in parallel within a single audit (each page = one browser).
-// 4 pages × up to 3 simultaneous audits = 12 Chrome instances max on Render (8 CPU).
-const CONCURRENT_PAGES = 4;
+// 2 pages × up to 2 simultaneous audits = 4 Chrome instances max on Render.
+// Keeping this low is critical — Lighthouse's gather phase is CPU-intensive and
+// Chrome will OOM-crash or fail to initialize if too many instances compete.
+const CONCURRENT_PAGES = 2;
 
 export async function startAudit(session, onUpdate) {
   await _acquireGlobalSlot();
