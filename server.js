@@ -55,7 +55,7 @@ const wsConnections = new Map();
 // Audit queue
 const auditQueue = [];
 let runningAudits = 0;
-const MAX_CONCURRENT_AUDITS = 2;
+const MAX_CONCURRENT_AUDITS = 3;
 
 app.use(cors());
 app.use(express.json());
