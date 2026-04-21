@@ -290,6 +290,95 @@ async function runWcag22Audit(url, browser) {
   }
 }
 
+// ── Mobile viewport audit (320px) ────────────────────────────────────────────
+// Runs axe at 320 CSS pixels wide — the WCAG 1.4.10 Reflow reference width
+// (equivalent to a 1280px display zoomed to 400%).  Catches issues that only
+// appear at narrow widths: horizontal overflow, elements hidden by responsive
+// CSS, contrast changes driven by media queries, etc.
+// Returns { reflowIssues, violations } — raw violations so the caller can
+// deduplicate against desktop findings before building issue objects.
+async function runMobileAxeAudit(url, browser) {
+  const page = await browser.newPage();
+  try {
+    await page.setViewport({ width: 320, height: 640, isMobile: true });
+    await page.setDefaultNavigationTimeout(120_000);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
+    await new Promise(r => setTimeout(r, 1500));
+
+    // ── WCAG 1.4.10 Reflow check ─────────────────────────────────────────
+    // At 320px, content must not require horizontal scrolling.
+    const reflowIssues = await page.evaluate(() => {
+      const vw = window.innerWidth; // 320
+      if (document.documentElement.scrollWidth <= vw) return [];
+
+      // Find body children that extend beyond the viewport
+      const offenders = Array.from(document.body.querySelectorAll('*')).filter(el => {
+        const rect = el.getBoundingClientRect();
+        const cs   = window.getComputedStyle(el);
+        return (
+          rect.right > vw &&
+          rect.width  > 0 &&
+          rect.height > 0 &&
+          cs.display    !== 'none' &&
+          cs.visibility !== 'hidden' &&
+          cs.position   !== 'fixed' &&
+          cs.overflowX  !== 'hidden'
+        );
+      }).slice(0, 8);
+
+      return [{
+        id:          'wcag14-reflow',
+        title:       'Page requires horizontal scrolling at 320px width',
+        description: 'WCAG 1.4.10 Reflow requires that content can be presented at 320 CSS pixels wide without horizontal scrolling or loss of content.',
+        wcag:        '1.4.10',
+        wcagLevel:   'AA',
+        severity:    'serious',
+        score:       0,
+        displayValue: `${offenders.length || 1} element${offenders.length !== 1 ? 's' : ''} overflow`,
+        count:       offenders.length || 1,
+        elements:    offenders.map(el => ({
+          snippet:     el.outerHTML.substring(0, 200),
+          selector:    el.id ? `#${el.id}` : el.tagName.toLowerCase() + (el.className ? `.${[...el.classList][0] || ''}` : ''),
+          label:       '',
+          explanation: `Element extends to ${Math.round(el.getBoundingClientRect().right)}px at 320px viewport`,
+        })),
+      }];
+    });
+
+    // ── axe at mobile viewport ────────────────────────────────────────────
+    await page.evaluate(axeSource);
+
+    let timeoutHandle;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(
+        () => reject(new Error('Mobile axe-core timed out after 120s')),
+        AXE_TIMEOUT_MS
+      );
+    });
+    let results;
+    try {
+      results = await Promise.race([
+        page.evaluate(async (ruleIds) => {
+          return await window.axe.run(document, {
+            runOnly: { type: 'rule', values: ruleIds },
+            resultTypes: ['violations'],
+          });
+        }, ALL_AXE_RULE_IDS),
+        timeoutPromise,
+      ]);
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+
+    return { reflowIssues, violations: results?.violations || [] };
+  } finally {
+    await Promise.race([
+      page.close().catch(() => {}),
+      new Promise(r => setTimeout(r, 5_000)),
+    ]);
+  }
+}
+
 // ── axe-core audit (primary engine) ──────────────────────────────────────────
 // Runs all WCAG rules in ALL_AXE_WCAG_MAPPING in a single pass.
 // Also extracts interactive element labels for WCAG 3.2.4 cross-page analysis.
@@ -641,9 +730,10 @@ export async function runLighthouseAudit(url, browser, opts = {}) {
 }
 
 async function _runAxeIbmAudit(url, browser, opts) {
-  // Run axe (primary) and IBM in parallel — each opens its own page.
-  const [axeResult, ibmResult] = await Promise.allSettled([
+  // Run desktop axe, mobile axe (320px), and IBM in parallel — each opens its own page.
+  const [axeResult, mobileResult, ibmResult] = await Promise.allSettled([
     runFullAxeAudit(url, browser),
+    runMobileAxeAudit(url, browser),
     runIbmAudit(url, browser),
   ]);
 
@@ -656,6 +746,58 @@ async function _runAxeIbmAudit(url, browser, opts) {
   const ibmIssues = ibmResult.status === 'fulfilled'
     ? ibmResult.value
     : (console.warn(`[ibm] Skipped for ${url}: ${ibmResult.reason?.message}`), []);
+
+  // ── Mobile deduplication ──────────────────────────────────────────────────
+  // Only report mobile violations that are genuinely new vs desktop findings:
+  // same rule firing on a different element (responsive CSS hiding/changing it).
+  const mobileIssues = [];
+  if (mobileResult.status === 'fulfilled') {
+    const { reflowIssues, violations: mobileViolations } = mobileResult.value;
+
+    // Reflow issues have no desktop equivalent — always include them.
+    mobileIssues.push(...reflowIssues);
+
+    // Build a lookup of desktop findings: ruleId → Set of element selectors.
+    const desktopByRule = new Map();
+    for (const issue of axeIssues) {
+      if (!desktopByRule.has(issue.id)) desktopByRule.set(issue.id, new Set());
+      for (const el of (issue.elements || [])) {
+        if (el.selector) desktopByRule.get(issue.id).add(el.selector);
+      }
+    }
+
+    for (const v of mobileViolations) {
+      const wcagInfo = ALL_AXE_WCAG_MAPPING[v.id];
+      if (!wcagInfo) continue;
+
+      const desktopSelectors = desktopByRule.get(v.id) || new Set();
+      const mobileOnlyNodes  = v.nodes.filter(n => {
+        const sel = (n.target || []).join(', ');
+        return !desktopSelectors.has(sel);
+      });
+      if (mobileOnlyNodes.length === 0) continue;
+
+      mobileIssues.push({
+        id:           v.id,
+        title:        `${v.help} (mobile viewport)`,
+        description:  v.description || '',
+        severity:     wcagInfo.severity,
+        wcag:         wcagInfo.wcag,
+        wcagLevel:    wcagInfo.level,
+        score:        0,
+        displayValue: `${mobileOnlyNodes.length} element${mobileOnlyNodes.length !== 1 ? 's' : ''} (320px)`,
+        elements:     mobileOnlyNodes.slice(0, 8).map(n => ({
+          snippet:     n.html || '',
+          selector:    (n.target || []).join(', '),
+          label:       '',
+          explanation: n.failureSummary || '',
+        })),
+        count: mobileOnlyNodes.length,
+      });
+    }
+  } else {
+    console.warn(`[mobile-axe] Skipped for ${url}: ${mobileResult.reason?.message}`);
+  }
 
   // Optional WCAG 2.2 checks
   let wcag22Issues = [];
@@ -709,7 +851,7 @@ async function _runAxeIbmAudit(url, browser, opts) {
   }
 
   // Merge and sort all issues
-  const allIssues = [...axeIssues, ...ibmIssues, ...wcag22Issues];
+  const allIssues = [...axeIssues, ...mobileIssues, ...ibmIssues, ...wcag22Issues];
   allIssues.sort((a, b) =>
     (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2)
   );
