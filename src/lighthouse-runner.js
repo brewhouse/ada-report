@@ -1,5 +1,4 @@
 import puppeteer from 'puppeteer';
-import lighthouse from 'lighthouse';
 import { readFileSync, readdirSync } from 'fs';
 import { createRequire } from 'module';
 import { extractLabelsFn } from './consistency-checker.js';
@@ -13,113 +12,110 @@ const ibmAceSource = readFileSync(
   'utf8'
 );
 
-// axe-core rules that cover WCAG criteria Lighthouse does NOT test,
-// plus supplemental checks for criteria Lighthouse tests with fewer rules.
-// Rules already handled by Lighthouse are intentionally excluded to avoid duplicates.
-const AXE_WCAG_MAPPING = {
-  // ── NEW criteria (not covered by Lighthouse at all) ──────────────────────
-  'autocomplete-valid':      { wcag: '1.3.5', level: 'AA', severity: 'serious'  },
-  'avoid-inline-spacing':    { wcag: '1.4.12', level: 'AA', severity: 'serious'  },
-  'blink':                   { wcag: '2.2.2', level: 'A',  severity: 'serious'  },
-  'css-orientation-lock':    { wcag: '1.3.4', level: 'AA', severity: 'serious'  },
-  'link-in-text-block':      { wcag: '1.4.1', level: 'A',  severity: 'serious'  },
-  'marquee':                 { wcag: '2.2.2', level: 'A',  severity: 'serious'  },
-  'no-autoplay-audio':       { wcag: '1.4.2', level: 'A',  severity: 'serious'  },
-  // ── Supplemental checks for existing WCAG criteria ───────────────────────
-  'area-alt':                { wcag: '2.4.4', level: 'A',  severity: 'serious'  },
-  'aria-braille-equivalent': { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'aria-command-name':       { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'aria-conditional-attr':   { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'aria-deprecated-role':    { wcag: '4.1.2', level: 'A',  severity: 'moderate' },
-  'aria-prohibited-attr':    { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'aria-roledescription':    { wcag: '4.1.2', level: 'A',  severity: 'moderate' },
-  'aria-tooltip-name':       { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'duplicate-id':            { wcag: '4.1.1', level: 'A',  severity: 'moderate' },
-  'frame-focusable-content': { wcag: '2.1.1', level: 'A',  severity: 'serious'  },
-  'frame-title-unique':      { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'html-xml-lang-mismatch':  { wcag: '3.1.1', level: 'A',  severity: 'moderate' },
-  'input-button-name':       { wcag: '4.1.2', level: 'A',  severity: 'critical' },
-  'nested-interactive':      { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'p-as-heading':            { wcag: '1.3.1', level: 'A',  severity: 'moderate' },
-  'role-img-alt':            { wcag: '1.1.1', level: 'A',  severity: 'serious'  },
-  'scrollable-region-focusable': { wcag: '2.1.1', level: 'A', severity: 'serious' },
-  'server-side-image-map':   { wcag: '2.1.1', level: 'A',  severity: 'moderate' },
-  'summary-name':            { wcag: '4.1.2', level: 'A',  severity: 'serious'  },
-  'svg-img-alt':             { wcag: '1.1.1', level: 'A',  severity: 'serious'  },
-  'td-has-header':           { wcag: '1.3.1', level: 'A',  severity: 'serious'  },
-  // 3.3.2 Labels or Instructions — axe correctly maps this to 3.3.2
-  // (Lighthouse has the same rule but maps it to 1.3.1)
-  'form-field-multiple-labels': { wcag: '3.3.2', level: 'A', severity: 'moderate' },
+// ── Combined axe-core WCAG rule mapping ───────────────────────────────────────
+// All rules run in a single axe.run() call.  This replaces both the old
+// Lighthouse WCAG_MAPPING and the supplemental AXE_WCAG_MAPPING.
+// Lighthouse's accessibility checks are built on axe-core internally, so
+// running axe directly gives equivalent coverage without the heavyweight
+// Lighthouse gather/benchmark phase that caused Chrome OOM crashes.
+const ALL_AXE_WCAG_MAPPING = {
+  // ── 1.1 Text Alternatives ────────────────────────────────────────────────
+  'image-alt':                    { wcag: '1.1.1',  level: 'A',   severity: 'critical'  },
+  'input-image-alt':              { wcag: '1.1.1',  level: 'A',   severity: 'critical'  },
+  'object-alt':                   { wcag: '1.1.1',  level: 'A',   severity: 'serious'   },
+  'role-img-alt':                 { wcag: '1.1.1',  level: 'A',   severity: 'serious'   },
+  'svg-img-alt':                  { wcag: '1.1.1',  level: 'A',   severity: 'serious'   },
+  'aria-meter-name':              { wcag: '1.1.1',  level: 'A',   severity: 'serious'   },
+  'aria-progressbar-name':        { wcag: '1.1.1',  level: 'A',   severity: 'serious'   },
+  'image-redundant-alt':          { wcag: '1.1.1',  level: 'A',   severity: 'minor'     },
+  // ── 1.2 Time-based Media ────────────────────────────────────────────────
+  'audio-caption':                { wcag: '1.2.1',  level: 'A',   severity: 'critical'  },
+  'video-caption':                { wcag: '1.2.2',  level: 'A',   severity: 'critical'  },
+  // ── 1.3 Adaptable ───────────────────────────────────────────────────────
+  'label':                        { wcag: '1.3.1',  level: 'A',   severity: 'critical'  },
+  'aria-required-children':       { wcag: '1.3.1',  level: 'A',   severity: 'critical'  },
+  'aria-required-parent':         { wcag: '1.3.1',  level: 'A',   severity: 'critical'  },
+  'definition-list':              { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'dlitem':                       { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'heading-order':                { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'list':                         { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'listitem':                     { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'landmark-one-main':            { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'p-as-heading':                 { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'region':                       { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'table-duplicate-name':         { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'table-fake-caption':           { wcag: '1.3.1',  level: 'A',   severity: 'moderate'  },
+  'td-headers-attr':              { wcag: '1.3.1',  level: 'A',   severity: 'serious'   },
+  'td-has-header':                { wcag: '1.3.1',  level: 'A',   severity: 'serious'   },
+  'th-has-data-cells':            { wcag: '1.3.1',  level: 'A',   severity: 'serious'   },
+  'scope-attr-valid':             { wcag: '1.3.1',  level: 'A',   severity: 'serious'   },
+  'css-orientation-lock':         { wcag: '1.3.4',  level: 'AA',  severity: 'serious'   },
+  'autocomplete-valid':           { wcag: '1.3.5',  level: 'AA',  severity: 'serious'   },
+  // ── 1.4 Distinguishable ─────────────────────────────────────────────────
+  'link-in-text-block':           { wcag: '1.4.1',  level: 'A',   severity: 'serious'   },
+  'no-autoplay-audio':            { wcag: '1.4.2',  level: 'A',   severity: 'serious'   },
+  'color-contrast':               { wcag: '1.4.3',  level: 'AA',  severity: 'serious'   },
+  'meta-viewport':                { wcag: '1.4.4',  level: 'AA',  severity: 'critical'  },
+  'color-contrast-enhanced':      { wcag: '1.4.6',  level: 'AAA', severity: 'moderate'  },
+  'avoid-inline-spacing':         { wcag: '1.4.12', level: 'AA',  severity: 'serious'   },
+  // ── 2.1 Keyboard ────────────────────────────────────────────────────────
+  'frame-focusable-content':      { wcag: '2.1.1',  level: 'A',   severity: 'serious'   },
+  'scrollable-region-focusable':  { wcag: '2.1.1',  level: 'A',   severity: 'serious'   },
+  'server-side-image-map':        { wcag: '2.1.1',  level: 'A',   severity: 'moderate'  },
+  // ── 2.2 Enough Time ─────────────────────────────────────────────────────
+  'meta-refresh':                 { wcag: '2.2.1',  level: 'A',   severity: 'critical'  },
+  'blink':                        { wcag: '2.2.2',  level: 'A',   severity: 'serious'   },
+  'marquee':                      { wcag: '2.2.2',  level: 'A',   severity: 'serious'   },
+  // ── 2.4 Navigable ───────────────────────────────────────────────────────
+  'bypass':                       { wcag: '2.4.1',  level: 'A',   severity: 'moderate'  },
+  'document-title':               { wcag: '2.4.2',  level: 'A',   severity: 'serious'   },
+  'tabindex':                     { wcag: '2.4.3',  level: 'A',   severity: 'serious'   },
+  'link-name':                    { wcag: '2.4.4',  level: 'A',   severity: 'serious'   },
+  'area-alt':                     { wcag: '2.4.4',  level: 'A',   severity: 'serious'   },
+  'identical-links-same-purpose': { wcag: '2.4.9',  level: 'AAA', severity: 'minor'     },
+  // ── 2.5 Input Modalities ────────────────────────────────────────────────
+  'label-content-name-mismatch':  { wcag: '2.5.3',  level: 'A',   severity: 'serious'   },
+  // ── 3.1 Readable ────────────────────────────────────────────────────────
+  'html-has-lang':                { wcag: '3.1.1',  level: 'A',   severity: 'serious'   },
+  'html-lang-valid':              { wcag: '3.1.1',  level: 'A',   severity: 'serious'   },
+  'html-xml-lang-mismatch':       { wcag: '3.1.1',  level: 'A',   severity: 'moderate'  },
+  'valid-lang':                   { wcag: '3.1.2',  level: 'AA',  severity: 'moderate'  },
+  // ── 3.3 Input Assistance ────────────────────────────────────────────────
+  'form-field-multiple-labels':   { wcag: '3.3.2',  level: 'A',   severity: 'moderate'  },
+  // ── 4.1 Compatible ──────────────────────────────────────────────────────
+  'duplicate-id':                 { wcag: '4.1.1',  level: 'A',   severity: 'moderate'  },
+  'duplicate-id-active':          { wcag: '4.1.1',  level: 'A',   severity: 'serious'   },
+  'duplicate-id-aria':            { wcag: '4.1.1',  level: 'A',   severity: 'critical'  },
+  'aria-allowed-attr':            { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-braille-equivalent':      { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-command-name':            { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-conditional-attr':        { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-deprecated-role':         { wcag: '4.1.2',  level: 'A',   severity: 'moderate'  },
+  'aria-hidden-body':             { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'aria-hidden-focus':            { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-input-field-name':        { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-prohibited-attr':         { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-required-attr':           { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'aria-roles':                   { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'aria-roledescription':         { wcag: '4.1.2',  level: 'A',   severity: 'moderate'  },
+  'aria-toggle-field-name':       { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-tooltip-name':            { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-treeitem-name':           { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'aria-valid-attr':              { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'aria-valid-attr-value':        { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'button-name':                  { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'frame-title':                  { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'frame-title-unique':           { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'input-button-name':            { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'nested-interactive':           { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
+  'select-name':                  { wcag: '4.1.2',  level: 'A',   severity: 'critical'  },
+  'summary-name':                 { wcag: '4.1.2',  level: 'A',   severity: 'serious'   },
 };
 
-// WCAG mapping for common Lighthouse accessibility audits
-const WCAG_MAPPING = {
-  'color-contrast': { wcag: '1.4.3', level: 'AA', severity: 'serious' },
-  'color-contrast-enhanced': { wcag: '1.4.6', level: 'AAA', severity: 'moderate' },
-  'image-alt': { wcag: '1.1.1', level: 'A', severity: 'critical' },
-  'input-image-alt': { wcag: '1.1.1', level: 'A', severity: 'critical' },
-  'object-alt': { wcag: '1.1.1', level: 'A', severity: 'serious' },
-  'video-caption': { wcag: '1.2.2', level: 'A', severity: 'critical' },
-  'audio-caption': { wcag: '1.2.1', level: 'A', severity: 'critical' },
-  'button-name': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'link-name': { wcag: '2.4.4', level: 'A', severity: 'serious' },
-  'label': { wcag: '1.3.1', level: 'A', severity: 'critical' },
-  'select-name': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'frame-title': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'document-title': { wcag: '2.4.2', level: 'A', severity: 'serious' },
-  'heading-order': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'html-has-lang': { wcag: '3.1.1', level: 'A', severity: 'serious' },
-  'html-lang-valid': { wcag: '3.1.1', level: 'A', severity: 'serious' },
-  'valid-lang': { wcag: '3.1.2', level: 'AA', severity: 'moderate' },
-  'meta-viewport': { wcag: '1.4.4', level: 'AA', severity: 'critical' },
-  'tabindex': { wcag: '2.4.3', level: 'A', severity: 'serious' },
-  'focusable-controls': { wcag: '2.1.1', level: 'A', severity: 'serious' },
-  'interactive-element-affordance': { wcag: '1.3.3', level: 'A', severity: 'moderate' },
-  'managed-focus': { wcag: '2.4.3', level: 'A', severity: 'moderate' },
-  'focus-traps': { wcag: '2.1.2', level: 'A', severity: 'serious' },
-  'custom-controls-labels': { wcag: '1.3.1', level: 'A', severity: 'serious' },
-  'custom-controls-roles': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'aria-required-attr': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'aria-valid-attr': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'aria-valid-attr-value': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'aria-allowed-attr': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'aria-required-children': { wcag: '1.3.1', level: 'A', severity: 'critical' },
-  'aria-required-parent': { wcag: '1.3.1', level: 'A', severity: 'critical' },
-  'aria-roles': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'aria-hidden-body': { wcag: '4.1.2', level: 'A', severity: 'critical' },
-  'aria-hidden-focus': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'aria-input-field-name': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'aria-meter-name': { wcag: '1.1.1', level: 'A', severity: 'serious' },
-  'aria-progressbar-name': { wcag: '1.1.1', level: 'A', severity: 'serious' },
-  'aria-toggle-field-name': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'aria-treeitem-name': { wcag: '4.1.2', level: 'A', severity: 'serious' },
-  'definition-list': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'dlitem': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'list': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'listitem': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'td-headers-attr': { wcag: '1.3.1', level: 'A', severity: 'serious' },
-  'th-has-data-cells': { wcag: '1.3.1', level: 'A', severity: 'serious' },
-  'scope-attr-valid': { wcag: '1.3.1', level: 'A', severity: 'serious' },
-  'table-duplicate-name': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'table-fake-caption': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'duplicate-id-active': { wcag: '4.1.1', level: 'A', severity: 'serious' },
-  'duplicate-id-aria': { wcag: '4.1.1', level: 'A', severity: 'critical' },
-  'form-field-multiple-labels': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'identical-links-same-purpose': { wcag: '2.4.9', level: 'AAA', severity: 'minor' },
-  'image-redundant-alt': { wcag: '1.1.1', level: 'A', severity: 'minor' },
-  'label-content-name-mismatch': { wcag: '2.5.3', level: 'A', severity: 'serious' },
-  'landmark-one-main': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'meta-refresh': { wcag: '2.2.1', level: 'A', severity: 'critical' },
-  'skip-link': { wcag: '2.4.1', level: 'A', severity: 'moderate' },
-  'use-landmarks': { wcag: '1.3.1', level: 'A', severity: 'moderate' },
-  'visual-order-follows-dom': { wcag: '1.3.2', level: 'A', severity: 'moderate' },
-  'offscreen-content-hidden': { wcag: '1.3.2', level: 'A', severity: 'moderate' },
-  'logical-tab-order': { wcag: '2.4.3', level: 'A', severity: 'moderate' },
-};
+// axe-core rule IDs derived from the mapping above
+const ALL_AXE_RULE_IDS = Object.keys(ALL_AXE_WCAG_MAPPING);
 
-// IBM Equal Access Checker rules for WCAG criteria not covered by Lighthouse or axe-core.
-// Rule IDs verified against accessibility-checker-engine v4.0.13 checkpoint definitions.
-// Only VIOLATION-level rules are mapped; _review rules may return potentialviolation.
+// IBM Equal Access Checker rules for WCAG criteria not covered by axe-core.
 const IBM_WCAG_MAPPING = {
   // ── WCAG 2.4.7 Focus Visible (Level AA) ─────────────────────────────────────
   'element_tabbable_visible': { wcag: '2.4.7', level: 'AA', severity: 'serious',
@@ -148,20 +144,24 @@ const IBM_WCAG_MAPPING = {
 const IBM_RULE_IDS = Object.keys(IBM_WCAG_MAPPING);
 const IBM_TIMEOUT_MS = 150_000;
 
-const SEVERITY_ORDER = { critical: 0, serious: 1, moderate: 2, minor: 3 };
-const AXE_RULE_IDS = Object.keys(AXE_WCAG_MAPPING);
-const AXE_TIMEOUT_MS = 120_000;
-
 // ── WCAG 2.2 axe rule — only run when wcag22 option is enabled ────────────────
-// axe-core 4.8+ includes target-size; the other WCAG 2.2 criteria are checked
-// via custom Puppeteer logic in runWcag22Audit() below.
 const AXE_WCAG22_MAPPING = {
   'target-size': { wcag: '2.5.8', level: 'AA', severity: 'serious' },
 };
 const AXE_WCAG22_RULE_IDS = Object.keys(AXE_WCAG22_MAPPING);
 
-// Custom Puppeteer-based checks for the five WCAG 2.2 criteria that axe-core
-// does not cover.  Returns an array of issue objects (same shape as axe issues).
+const SEVERITY_ORDER = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+
+// Score penalty per issue (applied to a base of 100).
+// Capped per severity so a single type can't crater the entire score.
+const SCORE_PENALTY     = { critical: 5,  serious: 3,  moderate: 1,  minor: 0.5 };
+const SCORE_PENALTY_CAP = { critical: 25, serious: 15, moderate: 8,  minor: 4   };
+
+// axe timeout — color-contrast is CPU-intensive, so allow 2 minutes.
+const AXE_TIMEOUT_MS = 120_000;
+
+// ── WCAG 2.2 custom Puppeteer checks ─────────────────────────────────────────
+// Covers 2.4.11 / 2.5.7 / 3.2.6 / 3.3.7 / 3.3.8 which axe-core does not test.
 async function runWcag22Audit(url, browser) {
   const page = await browser.newPage();
   try {
@@ -173,8 +173,6 @@ async function runWcag22Audit(url, browser) {
       const issues = [];
 
       // ── 2.4.11 Focus Not Obscured ─────────────────────────────────────────
-      // Find fixed/sticky elements at the top of the viewport and collect any
-      // focusable elements whose top edge sits beneath them.
       const stickyEls = Array.from(document.querySelectorAll('*')).filter(el => {
         const cs = window.getComputedStyle(el);
         if (cs.position !== 'fixed' && cs.position !== 'sticky') return false;
@@ -218,13 +216,12 @@ async function runWcag22Audit(url, browser) {
           count: draggables.length,
           elements: draggables.slice(0, 5).map(el => ({
             snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
-            explanation: 'Verify that this element can be operated without dragging (e.g. up/down buttons or click-to-select).',
+            explanation: 'Verify that this element can be operated without dragging.',
           })),
         });
       }
 
       // ── 3.2.6 Consistent Help ─────────────────────────────────────────────
-      // Detect the presence of help mechanisms and flag for cross-page review.
       const HELP_PATTERNS = [
         '[href*="contact"],[href*="support"],[href*="help"],[href*="faq"],[href*="feedback"]',
         '[aria-label*="chat" i],[aria-label*="help" i],[title*="live chat" i]',
@@ -236,17 +233,16 @@ async function runWcag22Audit(url, browser) {
         issues.push({
           id: 'wcag22-consistent-help', wcag: '3.2.6', wcagLevel: 'A', severity: 'minor',
           title: 'Help mechanism detected — verify it appears in a consistent location across all pages',
-          description: 'WCAG 3.2.6 requires that help mechanisms such as contact information or live chat appear in the same relative order on every page.',
+          description: 'WCAG 3.2.6 requires that help mechanisms appear in the same relative order on every page.',
           count: helpEls.length,
           elements: helpEls.slice(0, 3).map(el => ({
             snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
-            explanation: 'Check that this help mechanism is in the same relative location on every page of the site.',
+            explanation: 'Check that this help mechanism is in the same relative location on every page.',
           })),
         });
       }
 
       // ── 3.3.7 Redundant Entry ─────────────────────────────────────────────
-      // Detect multi-step form patterns.
       const stepEls = Array.from(document.querySelectorAll(
         '[class*="step-"],[class*="wizard"],[class*="multi-step"],[data-step],[aria-label*="step" i],[class*="progress-step"]'
       )).filter(el => { const r = el.getBoundingClientRect(); return r.width > 0; });
@@ -254,7 +250,7 @@ async function runWcag22Audit(url, browser) {
         issues.push({
           id: 'wcag22-redundant-entry', wcag: '3.3.7', wcagLevel: 'A', severity: 'moderate',
           title: 'Multi-step form detected — verify users are not required to re-enter previously provided information',
-          description: 'WCAG 3.3.7 requires that information previously entered by the user is auto-populated or available for selection in subsequent steps.',
+          description: 'WCAG 3.3.7 requires that information previously entered is auto-populated or available for selection in subsequent steps.',
           count: stepEls.length,
           elements: stepEls.slice(0, 3).map(el => ({
             snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
@@ -264,7 +260,6 @@ async function runWcag22Audit(url, browser) {
       }
 
       // ── 3.3.8 Accessible Authentication ──────────────────────────────────
-      // Detect CAPTCHA elements on pages that appear to be auth flows.
       const captchaEls = Array.from(document.querySelectorAll(
         '[class*="captcha" i],[id*="captcha" i],iframe[src*="captcha"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[class*="g-recaptcha"],[class*="h-captcha"],[data-widget-type="CHECKBOX"]'
       ));
@@ -275,11 +270,11 @@ async function runWcag22Audit(url, browser) {
         issues.push({
           id: 'wcag22-accessible-auth', wcag: '3.3.8', wcagLevel: 'AA', severity: 'serious',
           title: 'Authentication form contains a CAPTCHA that may require a cognitive function test',
-          description: 'WCAG 3.3.8 prohibits cognitive function tests (such as image CAPTCHAs) as the only authentication method unless an alternative is provided.',
+          description: 'WCAG 3.3.8 prohibits cognitive function tests as the only authentication method unless an alternative is provided.',
           count: captchaEls.length,
           elements: captchaEls.slice(0, 3).map(el => ({
             snippet: el.outerHTML.substring(0, 200), selector: '', label: '',
-            explanation: 'Ensure a CAPTCHA-free login method (e.g. magic link, passkey, or image + audio alternative) is also available.',
+            explanation: 'Ensure a CAPTCHA-free login method is also available.',
           })),
         });
       }
@@ -296,20 +291,19 @@ async function runWcag22Audit(url, browser) {
   }
 }
 
-// Runs axe-core on the given URL using an existing Puppeteer browser instance.
+// ── axe-core audit (primary engine) ──────────────────────────────────────────
+// Runs all WCAG rules in ALL_AXE_WCAG_MAPPING in a single pass.
 // Also extracts interactive element labels for WCAG 3.2.4 cross-page analysis.
 // Returns { issues, interactiveLabels }.
-async function runAxeAudit(url, browser) {
+async function runFullAxeAudit(url, browser) {
   const page = await browser.newPage();
   try {
     await page.setDefaultNavigationTimeout(120_000);
-    // domcontentloaded is sufficient for axe; browser cache makes this fast
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    // Brief pause for JS frameworks to initialize
-    await new Promise(r => setTimeout(r, 800));
+    // Give JS frameworks time to render initial content.
+    await new Promise(r => setTimeout(r, 1500));
 
-    // Extract interactive labels for 3.2.4 BEFORE axe injection — pure DOM
-    // query, never blocked by CSP.
+    // Extract interactive labels for 3.2.4 BEFORE axe injection.
     let interactiveLabels = [];
     try {
       interactiveLabels = await page.evaluate(extractLabelsFn);
@@ -317,13 +311,13 @@ async function runAxeAudit(url, browser) {
       // Non-fatal — consistency check for this page will be skipped
     }
 
-    // Inject axe-core into the page
+    // Inject axe-core
     await page.evaluate(axeSource);
 
     let timeoutHandle;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(
-        () => reject(new Error('axe-core timed out after 60s')),
+        () => reject(new Error('axe-core timed out after 120s')),
         AXE_TIMEOUT_MS
       );
     });
@@ -336,7 +330,7 @@ async function runAxeAudit(url, browser) {
             runOnly: { type: 'rule', values: ruleIds },
             resultTypes: ['violations'],
           });
-        }, AXE_RULE_IDS),
+        }, ALL_AXE_RULE_IDS),
         timeoutPromise,
       ]);
     } finally {
@@ -345,7 +339,7 @@ async function runAxeAudit(url, browser) {
 
     const issues = [];
     for (const violation of (results?.violations || [])) {
-      const wcagInfo = AXE_WCAG_MAPPING[violation.id];
+      const wcagInfo = ALL_AXE_WCAG_MAPPING[violation.id];
       if (!wcagInfo) continue;
       const elements = violation.nodes.slice(0, 8).map(node => ({
         snippet: node.html || '',
@@ -354,7 +348,7 @@ async function runAxeAudit(url, browser) {
         explanation: node.failureSummary || '',
       }));
       issues.push({
-        id: `axe-${violation.id}`,
+        id: violation.id,
         title: violation.help,
         description: violation.description || '',
         severity: wcagInfo.severity,
@@ -375,23 +369,21 @@ async function runAxeAudit(url, browser) {
   }
 }
 
-// Runs IBM Equal Access Checker on the given URL using an existing Puppeteer browser instance.
-// Injects the locally-installed ace.js engine (no CDN download required).
-// Returns issues for WCAG criteria not covered by Lighthouse or axe-core.
+// ── IBM Equal Access Checker audit ───────────────────────────────────────────
+// Covers WCAG criteria not fully tested by axe-core (focus visible, hover
+// content, on-focus/on-input, error identification, reflow).
 async function runIbmAudit(url, browser) {
   const page = await browser.newPage();
   try {
     await page.setDefaultNavigationTimeout(120_000);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1500));
 
-    // Inject IBM ace.js engine; eval sets `var ace` in the eval scope,
-    // then we copy it to globalThis.ace_ibma so the Checker is accessible.
     await page.evaluate((src) => {
       return new Promise((resolve, reject) => {
         try {
           eval(src); // eslint-disable-line no-eval
-          globalThis.ace_ibma = ace; // ace declared by `var ace;` in ace.js
+          globalThis.ace_ibma = ace;
           resolve();
         } catch (e) {
           reject(e);
@@ -435,7 +427,6 @@ async function runIbmAudit(url, browser) {
       clearTimeout(timeoutHandle);
     }
 
-    // Group by ruleId, then convert to issue format
     const byRule = {};
     for (const r of (rawResults || [])) {
       if (!byRule[r.ruleId]) byRule[r.ruleId] = [];
@@ -476,27 +467,7 @@ async function runIbmAudit(url, browser) {
   }
 }
 
-function extractElements(audit) {
-  if (!audit.details || !audit.details.items) return [];
-  return audit.details.items.slice(0, 8).map(item => {
-    if (item.node) {
-      return {
-        snippet: item.node.snippet || '',
-        selector: item.node.selector || '',
-        label: item.node.nodeLabel || '',
-        explanation: item.node.explanation || '',
-      };
-    }
-    if (item.url) {
-      return { snippet: item.url, selector: '', label: '', explanation: '' };
-    }
-    if (typeof item === 'string') {
-      return { snippet: item, selector: '', label: '', explanation: '' };
-    }
-    return null;
-  }).filter(Boolean);
-}
-
+// ── Chrome process management ─────────────────────────────────────────────────
 // On Render, /proc shows ALL processes on the shared host kernel — thousands
 // of PIDs from other tenants' containers.  We can only see/kill processes
 // owned by our own UID, so filter by Uid before doing anything.
@@ -548,24 +519,19 @@ export function killAllChrome() {
 }
 
 // Recursively collect all descendant PIDs of a process by reading /proc.
-// On Linux, Chrome spawns renderer/network/GPU helper child processes that
-// become orphaned when only the parent is killed. This walks the full tree.
 function collectDescendants(rootPid) {
   const descendants = [];
   try {
-    // Build a ppid→[children] map from /proc
     const allPids = readdirSync('/proc').filter(f => /^\d+$/.test(f)).map(Number);
     const childMap = new Map();
     for (const pid of allPids) {
       try {
         const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-        // stat format: pid (comm) state ppid ...
         const ppid = parseInt(stat.split(')')[1].trim().split(' ')[1]);
         if (!childMap.has(ppid)) childMap.set(ppid, []);
         childMap.get(ppid).push(pid);
       } catch {}
     }
-    // BFS from rootPid
     const queue = [rootPid];
     while (queue.length) {
       const pid = queue.shift();
@@ -577,20 +543,12 @@ function collectDescendants(rootPid) {
 }
 
 // Force-kill a browser and ALL its descendant processes, then close via CDP.
-//
-// On Linux (Render), killing only the Chrome parent leaves renderer,
-// network-service, and GPU helper children as orphans — they accumulate
-// across audits until the container process limit is hit.
-//
-// We walk /proc to find every descendant of the Chrome PID and SIGKILL
-// them all (children first, parent last) before calling browser.close().
 export async function closeBrowser(browser) {
   if (!browser) return;
   const pid = browser.process()?.pid;
   if (pid) {
     if (process.platform === 'linux') {
       const pids = collectDescendants(pid);
-      // Kill children before parent so they can't be re-spawned
       for (const p of pids.reverse()) {
         try { process.kill(p, 'SIGKILL'); } catch {}
       }
@@ -617,11 +575,7 @@ const CHROME_ARGS = [
   '--safebrowsing-disable-auto-update',
   '--no-zygote',
   '--disable-crash-reporter',
-  // Reduce child process count per Chrome instance on Linux/Render:
-  // site-per-process spawns a renderer per origin — disable it so all
-  // content shares one renderer process instead of many.
   '--disable-features=site-per-process',
-  // Cap renderer processes to 1 per browser instance.
   '--renderer-process-limit=1',
 ];
 
@@ -658,145 +612,53 @@ export async function launchBrowser() {
   throw lastErr;
 }
 
-// Hard cap per page so a hung Chrome (e.g. OOM-killed while another audit starts)
-// can't freeze the entire audit indefinitely.  5 minutes >> maxWaitForLoad (2 min).
-const LIGHTHOUSE_PAGE_TIMEOUT_MS = 7 * 60 * 1000;
+// Hard cap per page. axe + IBM run in parallel; total audit time is well
+// under this, but a hung page shouldn't stall the queue indefinitely.
+const AUDIT_PAGE_TIMEOUT_MS = 5 * 60 * 1000;
 
+// ── Main audit entry point ────────────────────────────────────────────────────
+// Replaces the old runLighthouseAudit.  Runs axe-core (primary, all WCAG
+// rules) + IBM Equal Access Checker (supplemental) + optional WCAG 2.2 checks,
+// then computes a 0–100 score using a penalty model.
 export async function runLighthouseAudit(url, browser, opts = {}) {
-  const port = parseInt(new URL(browser.wsEndpoint()).port);
-
-  let result;
-  try {
-    let timeoutHandle;
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`Lighthouse timed out after 7 minutes`)),
-        LIGHTHOUSE_PAGE_TIMEOUT_MS
-      );
-    });
-    try {
-      result = await Promise.race([
-        lighthouse(url, {
-          port,
-          onlyCategories: ['accessibility'],
-          output: 'json',
-          logLevel: 'error',
-          formFactor: 'desktop',
-          screenEmulation: {
-            mobile: false,
-            width: 1350,
-            height: 940,
-            deviceScaleFactor: 1,
-            disabled: false,
-          },
-          throttlingMethod: 'provided',
-          disableFullPageScreenshot: true,
-          maxWaitForLoad: 120000, // 120 s — allow slow/SPA/gov pages to finish loading
-        }),
-        timeoutPromise,
-      ]);
-    } finally {
-      clearTimeout(timeoutHandle);
-    }
-  } catch (err) {
-    throw new Error(`Lighthouse failed for ${url}: ${err.message}`);
-  } finally {
-    // Close extra tabs so the browser stays clean for the next page.
-    // Cap at 10 s — if Chrome is stuck (e.g. a hung page), browser.pages()
-    // or page.close() can itself hang forever, freezing the entire audit.
-    await Promise.race([
-      (async () => {
-        try {
-          const openPages = await browser.pages();
-          for (const page of openPages) {
-            const pageUrl = page.url();
-            if (pageUrl !== 'about:blank' && pageUrl !== '') {
-              await page.close().catch(() => {});
-            }
-          }
-        } catch {}
-      })(),
-      new Promise(r => setTimeout(r, 10_000)),
-    ]);
-  }
-
-  const lhr = result.lhr;
-  const rawScore = lhr.categories?.accessibility?.score;
-
-  // A null score means Lighthouse ran but couldn't evaluate the page
-  // (typically a React/SPA page whose API calls never settled, or a login-
-  // gated page that rendered empty). Treat it as an auditable error rather
-  // than silently reporting 0.
-  if (rawScore === null || rawScore === undefined) {
-    throw new Error(
-      'Lighthouse returned no accessibility score — the page may not have fully rendered ' +
-      '(JavaScript-heavy page whose API calls did not complete in time, or the page requires login).'
+  // Outer timeout so a completely hung page doesn't block the worker forever.
+  let outerTimeoutHandle;
+  const outerTimeoutPromise = new Promise((_, reject) => {
+    outerTimeoutHandle = setTimeout(
+      () => reject(new Error(`Audit timed out after 5 minutes for ${url}`)),
+      AUDIT_PAGE_TIMEOUT_MS
     );
+  });
+
+  try {
+    const result = await Promise.race([
+      _runAxeIbmAudit(url, browser, opts),
+      outerTimeoutPromise,
+    ]);
+    return result;
+  } finally {
+    clearTimeout(outerTimeoutHandle);
   }
+}
 
-  const score = Math.round(rawScore * 100);
-  const auditRefs = lhr.categories?.accessibility?.auditRefs ?? [];
-  const issues = [];
-
-  for (const ref of auditRefs) {
-    const audit = lhr.audits?.[ref.id];
-    if (!audit) continue;
-
-    // Skip passed, not applicable, informative, and manual audits
-    if (
-      audit.score === 1 ||
-      audit.score === null ||
-      audit.scoreDisplayMode === 'notApplicable' ||
-      audit.scoreDisplayMode === 'informative' ||
-      audit.scoreDisplayMode === 'manual'
-    ) continue;
-
-    const wcagInfo = WCAG_MAPPING[audit.id] || {
-      wcag: 'N/A', level: 'N/A', severity: 'moderate'
-    };
-
-    const elements = extractElements(audit);
-    const totalCount = audit.details?.items?.length ?? 1;
-
-    issues.push({
-      id: audit.id,
-      title: audit.title,
-      description: audit.description?.replace(/\[Learn[^\]]*\]\([^)]*\)/g, '').trim() || '',
-      severity: wcagInfo.severity,
-      wcag: wcagInfo.wcag,
-      wcagLevel: wcagInfo.level,
-      score: audit.score,
-      displayValue: audit.displayValue || '',
-      elements,
-      count: totalCount,
-    });
-  }
-
-  // Run axe-core and IBM Equal Access Checker in parallel — each opens its own
-  // page in the same browser, so they don't block each other.
-  let axeIssues = [];
-  let interactiveLabels = [];
-  let ibmIssues = [];
-
+async function _runAxeIbmAudit(url, browser, opts) {
+  // Run axe (primary) and IBM in parallel — each opens its own page.
   const [axeResult, ibmResult] = await Promise.allSettled([
-    runAxeAudit(url, browser),
+    runFullAxeAudit(url, browser),
     runIbmAudit(url, browser),
   ]);
 
-  if (axeResult.status === 'fulfilled') {
-    axeIssues = axeResult.value.issues;
-    interactiveLabels = axeResult.value.interactiveLabels || [];
-  } else {
-    console.warn(`[axe] Skipped for ${url}: ${axeResult.reason?.message}`);
+  // axe is the primary engine — a failure here is not ignorable.
+  if (axeResult.status === 'rejected') {
+    throw axeResult.reason;
   }
 
-  if (ibmResult.status === 'fulfilled') {
-    ibmIssues = ibmResult.value;
-  } else {
-    console.warn(`[ibm] Skipped for ${url}: ${ibmResult.reason?.message}`);
-  }
+  const { issues: axeIssues, interactiveLabels } = axeResult.value;
+  const ibmIssues = ibmResult.status === 'fulfilled'
+    ? ibmResult.value
+    : (console.warn(`[ibm] Skipped for ${url}: ${ibmResult.reason?.message}`), []);
 
-  // Optionally run WCAG 2.2 checks (axe target-size + custom Puppeteer heuristics)
+  // Optional WCAG 2.2 checks
   let wcag22Issues = [];
   if (opts.wcag22) {
     // axe target-size rule (2.5.8)
@@ -847,31 +709,27 @@ export async function runLighthouseAudit(url, browser, opts = {}) {
     }
   }
 
-  // Merge and sort — axe IDs use 'axe-' prefix, IBM IDs use 'ibm-' prefix, WCAG 2.2 use 'wcag22-'/'axe22-'
-  const allIssues = [...issues, ...axeIssues, ...ibmIssues, ...wcag22Issues];
+  // Merge and sort all issues
+  const allIssues = [...axeIssues, ...ibmIssues, ...wcag22Issues];
   allIssues.sort((a, b) =>
     (SEVERITY_ORDER[a.severity] ?? 2) - (SEVERITY_ORDER[b.severity] ?? 2)
   );
 
-  // Adjust Lighthouse score downward for additional issues found by axe/IBM.
-  // Lighthouse already reflects its own findings, so only extra issues penalise.
-  const extraIssues = [...axeIssues, ...ibmIssues, ...wcag22Issues];
-  const PENALTY   = { critical: 5, serious: 3, moderate: 1, minor: 0.5 };
-  const PENALTY_CAP = { critical: 20, serious: 12, moderate: 6, minor: 3 };
-  let totalPenalty = 0;
+  // Compute 0–100 score: start at 100, apply per-severity penalties with caps.
+  let score = 100;
   for (const sev of ['critical', 'serious', 'moderate', 'minor']) {
-    const count = extraIssues.filter(i => i.severity === sev).length;
-    totalPenalty += Math.min(count * PENALTY[sev], PENALTY_CAP[sev]);
+    const count = allIssues.filter(i => i.severity === sev).length;
+    score -= Math.min(count * SCORE_PENALTY[sev], SCORE_PENALTY_CAP[sev]);
   }
-  const adjustedScore = Math.max(0, Math.round(score - totalPenalty));
+  const finalScore = Math.max(0, Math.round(score));
 
   return {
     url,
-    score: adjustedScore,
+    score: finalScore,
     issues: allIssues,
     issueCount: allIssues.length,
     status: 'completed',
     timestamp: new Date().toISOString(),
-    interactiveLabels,  // used by cross-page 3.2.4 consistency check
+    interactiveLabels,
   };
 }

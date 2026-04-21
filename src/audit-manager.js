@@ -15,11 +15,11 @@ function isNonRetryableError(error) {
   );
 }
 
-// Lighthouse internal errors caused by a stale Chrome instance — must replace
-// the browser before retrying, otherwise the retry will fail identically.
+// Puppeteer/Chrome errors caused by a stale or crashed browser instance —
+// must replace the browser before retrying, otherwise the retry will fail identically.
 function requiresBrowserReplace(error) {
   const msg = error.message || '';
-  return /performance mark has not been set|lh:runner|lh:driver|webSocket URL|websocket|CDP|target closed|connection closed/i.test(msg);
+  return /webSocket URL|websocket|CDP|target closed|connection closed|Protocol error|session closed/i.test(msg);
 }
 
 // Normalize a pathname for comparison: strip trailing slash, lowercase.
