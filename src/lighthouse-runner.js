@@ -56,7 +56,6 @@ const ALL_AXE_WCAG_MAPPING = {
   'no-autoplay-audio':            { wcag: '1.4.2',  level: 'A',   severity: 'serious'   },
   'color-contrast':               { wcag: '1.4.3',  level: 'AA',  severity: 'serious'   },
   'meta-viewport':                { wcag: '1.4.4',  level: 'AA',  severity: 'critical'  },
-  'color-contrast-enhanced':      { wcag: '1.4.6',  level: 'AAA', severity: 'moderate'  },
   'avoid-inline-spacing':         { wcag: '1.4.12', level: 'AA',  severity: 'serious'   },
   // ── 2.1 Keyboard ────────────────────────────────────────────────────────
   'frame-focusable-content':      { wcag: '2.1.1',  level: 'A',   severity: 'serious'   },
