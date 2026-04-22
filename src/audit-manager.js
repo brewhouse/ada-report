@@ -388,7 +388,68 @@ async function _runAudit(session, onUpdate) {
       console.warn('[consistency] Skipped:', err.message);
     }
 
-    // Phase 5: Compute summary
+    // Phase 5: Aggregate supplemental data (forms, iframes, broken links)
+    if (session.listForms || session.listIframes || session.checkBrokenLinks) {
+      const pagesWithForms    = [];  // { url, count } — pages with non-global forms
+      const pagesWithIframes  = [];  // { url, count } — pages with non-global iframes
+      let globalFormsExist    = false;
+      let globalIframesExist  = false;
+      const linkMap = new Map();     // href → Set of page URLs
+
+      for (const page of completed) {
+        const sd = page.supplementalData;
+        if (!sd) continue;
+
+        if (session.listForms && sd.forms.length > 0) {
+          const global    = sd.forms.filter(f => f.isGlobal);
+          const pageLocal = sd.forms.filter(f => !f.isGlobal);
+          if (global.length > 0) globalFormsExist = true;
+          if (pageLocal.length > 0) pagesWithForms.push({ url: page.url, count: pageLocal.length });
+        }
+
+        if (session.listIframes && sd.iframes.length > 0) {
+          const global    = sd.iframes.filter(f => f.isGlobal);
+          const pageLocal = sd.iframes.filter(f => !f.isGlobal);
+          if (global.length > 0) globalIframesExist = true;
+          if (pageLocal.length > 0) pagesWithIframes.push({ url: page.url, count: pageLocal.length });
+        }
+
+        if (session.checkBrokenLinks) {
+          for (const href of (sd.links || [])) {
+            if (!linkMap.has(href)) linkMap.set(href, new Set());
+            linkMap.get(href).add(page.url);
+          }
+        }
+      }
+
+      // Broken link checks — batch HTTP HEAD/GET per unique href (cap at 300)
+      let brokenLinks = [];
+      if (session.checkBrokenLinks && linkMap.size > 0) {
+        const uniqueHrefs = [...linkMap.keys()].slice(0, 300);
+        const BATCH = 20;
+        const results = [];
+        for (let i = 0; i < uniqueHrefs.length; i += BATCH) {
+          const batch = uniqueHrefs.slice(i, i + BATCH);
+          results.push(...await Promise.all(batch.map(async (href) => {
+            const status = await checkUrlStatus(href);
+            return { href, status };
+          })));
+        }
+        brokenLinks = results
+          .filter(r => r.status === 'not-found')
+          .map(r => ({ href: r.href, foundOnPages: [...linkMap.get(r.href)] }));
+      }
+
+      onUpdate({
+        pagesWithForms,
+        globalFormsExist,
+        pagesWithIframes,
+        globalIframesExist,
+        brokenLinks,
+      });
+    }
+
+    // Phase 6: Compute summary
     const scores = completed.map(p => p.score).filter(s => s !== null);
     const allIssues = completed.flatMap(p => p.issues || []);
 

@@ -399,6 +399,45 @@ async function runFullAxeAudit(url, browser) {
       // Non-fatal — consistency check for this page will be skipped
     }
 
+    // Extract supplemental page data: forms, iframes, and links.
+    // Used to power the "List pages with forms/iframes" and "Check broken links" features.
+    // isGlobal=true means the element lives in a site-wide header/footer/nav.
+    let supplementalData = { forms: [], iframes: [], links: [] };
+    try {
+      supplementalData = await page.evaluate(() => {
+        function isInGlobal(el) {
+          let node = el.parentElement;
+          while (node && node !== document.body) {
+            const tag  = node.tagName?.toLowerCase();
+            const role = node.getAttribute?.('role')?.toLowerCase();
+            if (tag === 'header' || tag === 'footer' || tag === 'nav' ||
+                role === 'banner' || role === 'contentinfo' || role === 'navigation') return true;
+            node = node.parentElement;
+          }
+          return false;
+        }
+
+        const forms = Array.from(document.querySelectorAll('form')).map(f => ({
+          snippet: f.outerHTML.substring(0, 150),
+          isGlobal: isInGlobal(f),
+        }));
+
+        const iframes = Array.from(document.querySelectorAll('iframe')).map(fr => ({
+          src: fr.src || fr.getAttribute('data-src') || '',
+          title: fr.title || fr.getAttribute('aria-label') || '',
+          isGlobal: isInGlobal(fr),
+        }));
+
+        const links = Array.from(document.querySelectorAll('a[href]'))
+          .map(a => a.href)
+          .filter(h => h && (h.startsWith('http://') || h.startsWith('https://')));
+
+        return { forms, iframes, links };
+      });
+    } catch (e) {
+      // Non-fatal — supplemental features will skip this page
+    }
+
     // Inject axe-core
     await page.evaluate(axeSource);
 
@@ -448,7 +487,7 @@ async function runFullAxeAudit(url, browser) {
         count: violation.nodes.length,
       });
     }
-    return { issues, interactiveLabels };
+    return { issues, interactiveLabels, supplementalData };
   } finally {
     await Promise.race([
       page.close().catch(() => {}),
@@ -742,7 +781,7 @@ async function _runAxeIbmAudit(url, browser, opts) {
     throw axeResult.reason;
   }
 
-  const { issues: axeIssues, interactiveLabels } = axeResult.value;
+  const { issues: axeIssues, interactiveLabels, supplementalData } = axeResult.value;
   const ibmIssues = ibmResult.status === 'fulfilled'
     ? ibmResult.value
     : (console.warn(`[ibm] Skipped for ${url}: ${ibmResult.reason?.message}`), []);
@@ -872,5 +911,6 @@ async function _runAxeIbmAudit(url, browser, opts) {
     status: 'completed',
     timestamp: new Date().toISOString(),
     interactiveLabels,
+    supplementalData: supplementalData || { forms: [], iframes: [], links: [] },
   };
 }

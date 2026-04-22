@@ -319,18 +319,22 @@ document.getElementById('audit-form').addEventListener('submit', async (e) => {
   btn.textContent = 'Starting...';
 
   try {
-    const wcag22 = document.getElementById('wcag22-checkbox').checked;
+    const wcag22            = document.getElementById('wcag22-checkbox').checked;
+    const listForms         = document.getElementById('list-forms-checkbox').checked;
+    const listIframes       = document.getElementById('list-iframes-checkbox').checked;
+    const checkBrokenLinks  = document.getElementById('check-broken-links-checkbox').checked;
+    const supplementalOpts  = { ...(listForms && { listForms }), ...(listIframes && { listIframes }), ...(checkBrokenLinks && { checkBrokenLinks }) };
     let body;
     if (auditMode === 'url-list') {
       const urlList = parseUrlList();
       if (urlList.length === 0) throw new Error('Please enter at least one valid URL (must start with http:// or https://).');
-      body = { urlList, wcag22 };
+      body = { urlList, wcag22, ...supplementalOpts };
     } else {
       const url = document.getElementById('url-input').value.trim();
       if (!url) throw new Error('Please enter a website URL.');
       const maxPages = parseInt(document.getElementById('max-pages-input').value);
       const excludeSitemaps = parseExcludeSitemaps();
-      body = { url, maxPages, wcag22, ...(excludeSitemaps.length > 0 && { excludeSitemaps }) };
+      body = { url, maxPages, wcag22, ...supplementalOpts, ...(excludeSitemaps.length > 0 && { excludeSitemaps }) };
     }
 
     const res = await fetch('/api/audit', {
@@ -683,6 +687,110 @@ function renderResults(session) {
 
   // Render pages list
   renderPagesList(session.pages);
+
+  // Render supplemental sections (forms, iframes, broken links) if data is available
+  renderSupplementalSections(session);
+}
+
+function renderSupplementalSections(session) {
+  const container = document.getElementById('supplemental-sections');
+  if (!container) return;
+
+  const sections = [];
+
+  // ── Pages with Forms ─────────────────────────────────────────────────────────
+  if (session.pagesWithForms !== null || session.globalFormsExist) {
+    const pages  = session.pagesWithForms || [];
+    const global = session.globalFormsExist;
+    let html = `<div class="suppl-section">
+      <button class="suppl-toggle" aria-expanded="true" onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.style.display=this.getAttribute('aria-expanded')==='true'?'':'none'">
+        <span class="suppl-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Pages with Forms
+        </span>
+        <span class="suppl-count">${pages.length + (global ? 1 : 0)} result${pages.length + (global ? 1 : 0) !== 1 ? 's' : ''}</span>
+      </button>
+      <div class="suppl-body">`;
+    if (global) {
+      html += `<div class="suppl-note">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        A form was found in the site-wide header, footer, or navigation — it appears on all pages and is listed once here.
+      </div>`;
+    }
+    if (pages.length === 0 && !global) {
+      html += `<div class="suppl-empty">No forms detected on any audited page.</div>`;
+    } else {
+      html += `<div class="suppl-list">${pages.map(p => `
+        <div class="suppl-row">
+          <span class="suppl-url" title="${escapeHtml(p.url)}">${escapeHtml(shortUrl(p.url))}</span>
+          <span class="suppl-badge">${p.count} form${p.count !== 1 ? 's' : ''}</span>
+        </div>`).join('')}
+      </div>`;
+    }
+    html += `</div></div>`;
+    sections.push(html);
+  }
+
+  // ── Pages with Iframes ───────────────────────────────────────────────────────
+  if (session.pagesWithIframes !== null || session.globalIframesExist) {
+    const pages  = session.pagesWithIframes || [];
+    const global = session.globalIframesExist;
+    let html = `<div class="suppl-section">
+      <button class="suppl-toggle" aria-expanded="true" onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.style.display=this.getAttribute('aria-expanded')==='true'?'':'none'">
+        <span class="suppl-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          Pages with Iframes
+        </span>
+        <span class="suppl-count">${pages.length + (global ? 1 : 0)} result${pages.length + (global ? 1 : 0) !== 1 ? 's' : ''}</span>
+      </button>
+      <div class="suppl-body">`;
+    if (global) {
+      html += `<div class="suppl-note">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        An iframe was found in the site-wide header, footer, or navigation — it appears on all pages and is listed once here.
+      </div>`;
+    }
+    if (pages.length === 0 && !global) {
+      html += `<div class="suppl-empty">No iframes detected on any audited page.</div>`;
+    } else {
+      html += `<div class="suppl-list">${pages.map(p => `
+        <div class="suppl-row">
+          <span class="suppl-url" title="${escapeHtml(p.url)}">${escapeHtml(shortUrl(p.url))}</span>
+          <span class="suppl-badge">${p.count} iframe${p.count !== 1 ? 's' : ''}</span>
+        </div>`).join('')}
+      </div>`;
+    }
+    html += `</div></div>`;
+    sections.push(html);
+  }
+
+  // ── Broken Links ─────────────────────────────────────────────────────────────
+  if (session.brokenLinks !== null) {
+    const broken = session.brokenLinks || [];
+    let html = `<div class="suppl-section">
+      <button class="suppl-toggle" aria-expanded="true" onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.style.display=this.getAttribute('aria-expanded')==='true'?'':'none'">
+        <span class="suppl-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+          Broken Links
+        </span>
+        <span class="suppl-count">${broken.length} broken</span>
+      </button>
+      <div class="suppl-body">`;
+    if (broken.length === 0) {
+      html += `<div class="suppl-empty" style="color:#16a34a">No broken links found — all checked links returned valid responses.</div>`;
+    } else {
+      html += `<div class="suppl-list">${broken.map(b => `
+        <div class="suppl-row suppl-row-broken">
+          <div class="suppl-broken-href" title="${escapeHtml(b.href)}">${escapeHtml(b.href)}</div>
+          <div class="suppl-broken-pages">Found on: ${b.foundOnPages.slice(0, 3).map(u => `<span class="suppl-found-on" title="${escapeHtml(u)}">${escapeHtml(shortUrl(u))}</span>`).join(', ')}${b.foundOnPages.length > 3 ? ` and ${b.foundOnPages.length - 3} more` : ''}</div>
+        </div>`).join('')}
+      </div>`;
+    }
+    html += `</div></div>`;
+    sections.push(html);
+  }
+
+  container.innerHTML = sections.join('');
 }
 
 function renderPagesList(pages) {

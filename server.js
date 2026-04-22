@@ -213,7 +213,14 @@ function sanitizeSession(session) {
       issues:     p.issues || [],   // included so the right panel can display them
       error:      p.error,
       timestamp:  p.timestamp,
+      // supplementalData intentionally stripped — aggregated results live on session
     })),
+    // Supplemental feature results
+    pagesWithForms:    session.pagesWithForms    ?? null,
+    globalFormsExist:  session.globalFormsExist  ?? false,
+    pagesWithIframes:  session.pagesWithIframes  ?? null,
+    globalIframesExist: session.globalIframesExist ?? false,
+    brokenLinks:       session.brokenLinks       ?? null,
   };
 }
 
@@ -533,7 +540,10 @@ async function getSessionForReport(id) {
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 app.post('/api/audit', (req, res) => {
-  const { url, maxPages = 50, urlList, excludeSitemaps, wcag22 = false } = req.body;
+  const {
+    url, maxPages = 50, urlList, excludeSitemaps, wcag22 = false,
+    listForms = false, listIframes = false, checkBrokenLinks = false,
+  } = req.body;
 
   if (urlList) {
     if (!Array.isArray(urlList) || urlList.length === 0) {
@@ -579,7 +589,15 @@ app.post('/api/audit', (req, res) => {
     progress:        { crawled: 0, total: 0, audited: 0 },
     summary:         null,
     error:           null,
-    wcag22:          !!wcag22,
+    wcag22:           !!wcag22,
+    listForms:        !!listForms,
+    listIframes:      !!listIframes,
+    checkBrokenLinks: !!checkBrokenLinks,
+    pagesWithForms:   null,
+    globalFormsExist: false,
+    pagesWithIframes: null,
+    globalIframesExist: false,
+    brokenLinks:      null,
     queuePosition:   auditQueue.length + 1,
   };
 
