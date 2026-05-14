@@ -200,7 +200,22 @@ async function _runAudit(session, onUpdate) {
     }, excludeUrls);
 
     if (pages.length === 0) {
-      throw new Error('No pages found to audit. The site may be inaccessible or block crawlers.');
+      // Pre-flight check: try reaching the root URL to give a more specific error.
+      let reachable = false;
+      try {
+        const probe = await axios.get(session.url, {
+          timeout: 15000, maxRedirects: 5, validateStatus: () => true,
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' },
+        });
+        reachable = probe.status < 500;
+        console.log(`[audit] pre-flight check ${session.url}: HTTP ${probe.status}`);
+      } catch (probeErr) {
+        console.warn(`[audit] pre-flight check ${session.url} failed: ${probeErr.code || probeErr.message}`);
+      }
+      if (!reachable) {
+        throw new Error(`No pages found to audit. The audit server cannot reach ${new URL(session.url).hostname} — the site may be down, blocking cloud server IPs, or behind a firewall.`);
+      }
+      throw new Error('No pages found to audit. The site was reachable but returned no crawlable pages — it may block automated crawlers or require JavaScript authentication.');
     }
   }
 
@@ -372,6 +387,7 @@ async function _runAudit(session, onUpdate) {
 
     // Phase 4: Cross-page consistency check for WCAG 3.2.4
     const completed = auditedPages.filter(p => p && p.status === 'completed');
+    const consistencyModifiedPages = [];
     try {
       const consistencyResults = analyzeConsistency(completed);
       for (const { issue, primaryUrl } of consistencyResults) {
@@ -379,10 +395,13 @@ async function _runAudit(session, onUpdate) {
         if (targetPage) {
           targetPage.issues.push(issue);
           targetPage.issueCount = targetPage.issues.length;
+          if (!consistencyModifiedPages.includes(targetPage)) {
+            consistencyModifiedPages.push(targetPage);
+          }
         }
       }
       if (consistencyResults.length > 0) {
-        console.log(`[consistency] ${consistencyResults.length} WCAG 3.2.4 inconsistency group(s) detected`);
+        console.log(`[consistency] ${consistencyResults.length} WCAG 3.2.4 inconsistency group(s) detected — ${consistencyModifiedPages.length} page(s) updated`);
       }
     } catch (err) {
       console.warn('[consistency] Skipped:', err.message);
@@ -478,6 +497,7 @@ async function _runAudit(session, onUpdate) {
       summary,
       endTime: new Date().toISOString(),
       currentPage: null,
+      consistencyModifiedPages: consistencyModifiedPages.length > 0 ? consistencyModifiedPages : undefined,
     });
 
   } finally {

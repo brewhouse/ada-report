@@ -475,15 +475,31 @@ export async function getFullSession(sessionId) {
     }
   }
 
-  session.pages = pageRows.map(p => ({
-    url:        p.url,
-    status:     p.status,
-    score:      p.score,
-    issueCount: p.issue_count,
-    issues:     issueMap[p.id] || [],
-    error:      p.error_message || null,
-    timestamp:  p.audited_at ? new Date(p.audited_at).toISOString() : null,
-  }));
+  session.pages = pageRows.map(p => {
+    const issues = issueMap[p.id] || [];
+    return {
+      url:        p.url,
+      status:     p.status,
+      score:      p.score,
+      // Use actual loaded issue count — more reliable than the stored counter,
+      // which may be stale if the consistency checker added issues after initial save.
+      issueCount: issues.length || p.issue_count,
+      issues,
+      error:      p.error_message || null,
+      timestamp:  p.audited_at ? new Date(p.audited_at).toISOString() : null,
+    };
+  });
+
+  // Reconcile summary totals with actual loaded issue data so the header
+  // always matches per-page counts even if the stored summary drifted.
+  if (session.summary && session.pages.length > 0) {
+    const allIssues = session.pages.flatMap(p => p.issues);
+    session.summary.totalIssues    = allIssues.length;
+    session.summary.criticalIssues = allIssues.filter(i => i.severity === 'critical').length;
+    session.summary.seriousIssues  = allIssues.filter(i => i.severity === 'serious').length;
+    session.summary.moderateIssues = allIssues.filter(i => i.severity === 'moderate').length;
+    session.summary.minorIssues    = allIssues.filter(i => i.severity === 'minor').length;
+  }
 
   return session;
 }

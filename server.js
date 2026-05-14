@@ -210,7 +210,8 @@ function sanitizeSession(session) {
       url:        p.url,
       status:     p.status,
       score:      p.score,
-      issueCount: p.issueCount,
+      // Prefer issues.length when available — stays in sync with consistency-check additions
+      issueCount: p.issues && p.issues.length > 0 ? p.issues.length : (p.issueCount || 0),
       issues:     p.issues || [],   // included so the right panel can display them
       error:      p.error,
       timestamp:  p.timestamp,
@@ -363,6 +364,21 @@ async function processAuditQueue() {
 
     // Wait for all page saves to finish before persisting the session summary.
     await Promise.allSettled(pendingPageSaves);
+
+    // Re-save any pages that the consistency checker modified after initial save.
+    // These pages have extra issues added in memory but the DB still has the old counts.
+    if (session.consistencyModifiedPages && session.consistencyModifiedPages.length > 0) {
+      for (const page of session.consistencyModifiedPages) {
+        try {
+          await deletePageByUrl(session.id, page.url);
+          await savePage(session.id, page);
+          console.log(`[consistency] Re-saved ${page.url} with ${page.issueCount} issues`);
+        } catch (err) {
+          console.warn(`[consistency] Re-save failed for ${page.url}:`, err.message);
+        }
+      }
+      delete session.consistencyModifiedPages;
+    }
 
     if (!session._cancelledExternally) {
       await saveSessionToDb(session);
