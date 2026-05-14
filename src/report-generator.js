@@ -56,6 +56,34 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+// Proportionally boost a page's score based on how many of its issues are ignored.
+// All issues ignored → 100.  None ignored → original score unchanged.
+function computeAdjustedScore(page, ignoredSet) {
+  if (page.score === null || page.score === undefined) return page.score;
+  const issues = page.issues || [];
+  if (!issues.length) return page.score;
+  const ignored = issues.filter(i => ignoredSet.has(`${page.url}::${i.id}`)).length;
+  if (!ignored) return page.score;
+  return Math.min(100, Math.round(page.score + (100 - page.score) * (ignored / issues.length)));
+}
+
+// Compute adjusted average score and score-distribution buckets for a set of pages.
+function computeAdjustedSummary(completedPages, ignoredSet) {
+  const dist = { above90: 0, p70to89: 0, p50to69: 0, below50: 0, below90: 0 };
+  const scores = [];
+  for (const p of completedPages) {
+    const s = computeAdjustedScore(p, ignoredSet);
+    if (s === null || s === undefined) continue;
+    scores.push(s);
+    if      (s >= 90) { dist.above90++; }
+    else if (s >= 70) { dist.p70to89++; dist.below90++; }
+    else if (s >= 50) { dist.p50to69++; dist.below90++; }
+    else              { dist.below50++;  dist.below90++; }
+  }
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  return { avg, dist };
+}
+
 function scoreGaugeSvg(score, size = 120) {
   const color = scoreColor(score);
   const pct = score ?? 0;
@@ -221,6 +249,8 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
   for (const page of completedPages)
     for (const issue of (page.issues || []))
       if (ignoredSet.has(`${page.url}::${issue.id}`)) ignoredInSession++;
+
+  const adjAvgScore = computeAdjustedSummary(completedPages, ignoredSet).avg ?? summary?.averageScore ?? 0;
 
   // Aggregate active issues by WCAG criterion across all pages (ignored issues excluded)
   const issuesByWcag = {};
@@ -434,7 +464,7 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
     <!-- Evaluation Methods -->
     <h2>Evaluation Methods Used</h2>
     <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>Axe Tools</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
-    <p style="margin-top:5px;">Overall results: Average score <strong>${summary?.averageScore ?? 'N/A'}/100</strong> &bull; ${Math.max(0, (summary?.totalIssues ?? 0) - ignoredInSession).toLocaleString()} active issues found${ignoredInSession > 0 ? ` (${ignoredInSession} ignored / visually verified)` : ''} &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
+    <p style="margin-top:5px;">Overall results: Average score <strong>${adjAvgScore}/100</strong> &bull; ${Math.max(0, (summary?.totalIssues ?? 0) - ignoredInSession).toLocaleString()} active issues found${ignoredInSession > 0 ? ` (${ignoredInSession} ignored / visually verified)` : ''} &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
 
     <!-- Applicable Standards -->
     <h2>Applicable Standards / Guidelines</h2>
@@ -626,13 +656,14 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
     })
     .slice(0, 20);
 
-  const avgScore = summary?.averageScore ?? 0;
+  const { avg: adjAvg, dist: adjDist } = computeAdjustedSummary(completedPages, ignoredSet);
+  const avgScore = adjAvg ?? 0;
   const avgColor = scoreColor(avgScore);
   const pagesNoIssues = completedPages.filter(p => {
     const active = (p.issues || []).filter(i => !ignoredSet.has(`${p.url}::${i.id}`)).length;
     return active === 0;
   }).length;
-  const pagesBelowScore90 = completedPages.filter(p => p.score !== null && p.score !== undefined && p.score < 90).length;
+  const pagesBelowScore90 = adjDist.below90;
 
   const coverLogo = brand
     ? `<img src="${brand.logoUrl}" alt="${escapeHtml(brand.name)}" class="cover-logo">`
@@ -749,10 +780,10 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
 
     <h3>Score Distribution</h3>
     <div class="score-dist-grid">
-      <div class="sd-cell sd-green"><span class="sd-count">${summary?.pagesAbove90 ?? 0}</span><span class="sd-label">Score ≥90</span></div>
-      <div class="sd-cell sd-lime"><span class="sd-count">${summary?.pages70to89 ?? 0}</span><span class="sd-label">Score 70–89</span></div>
-      <div class="sd-cell sd-amber"><span class="sd-count">${summary?.pages50to69 ?? 0}</span><span class="sd-label">Score 50–69</span></div>
-      <div class="sd-cell sd-red"><span class="sd-count">${summary?.pagesBelow50 ?? 0}</span><span class="sd-label">Score &lt;50</span></div>
+      <div class="sd-cell sd-green"><span class="sd-count">${adjDist.above90}</span><span class="sd-label">Score ≥90</span></div>
+      <div class="sd-cell sd-lime"><span class="sd-count">${adjDist.p70to89}</span><span class="sd-label">Score 70–89</span></div>
+      <div class="sd-cell sd-amber"><span class="sd-count">${adjDist.p50to69}</span><span class="sd-label">Score 50–69</span></div>
+      <div class="sd-cell sd-red"><span class="sd-count">${adjDist.below50}</span><span class="sd-label">Score &lt;50</span></div>
     </div>
 
     <!-- Most Common Issues -->
@@ -808,11 +839,12 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
           const mod  = ai.filter(i => i.severity === 'moderate').length;
           const min  = ai.filter(i => i.severity === 'minor').length;
           const noIssues = ai.length === 0;
+          const ps = computeAdjustedScore(page, ignoredSet);
           return `
           <tr>
             <td style="word-break:break-all;font-size:10px;">${escapeHtml(page.url)}</td>
             <td style="text-align:center;">
-              <span class="score-pill" style="color:${scoreColor(page.score)};background:${scoreBg(page.score)}">${page.score ?? 'N/A'}</span>
+              <span class="score-pill" style="color:${scoreColor(ps)};background:${scoreBg(ps)}">${ps ?? 'N/A'}</span>
             </td>
             <td style="text-align:center;font-weight:${noIssues ? '400' : '700'};color:${noIssues ? '#16a34a' : '#1e293b'}">
               ${noIssues ? '&#10003;' : ai.length}
@@ -901,14 +933,15 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
     })
     .slice(0, 20);
 
-  const avgScore = summary?.averageScore ?? 0;
+  const { avg: adjAvg, dist: adjDist } = computeAdjustedSummary(completedPages, ignoredSet);
+  const avgScore = adjAvg ?? 0;
   const avgColor = scoreColor(avgScore);
 
   const pagesNoIssues = completedPages.filter(p => {
     const active = (p.issues || []).filter(i => !ignoredSet.has(`${p.url}::${i.id}`)).length;
     return active === 0;
   }).length;
-  const pagesBelowScore90 = completedPages.filter(p => p.score !== null && p.score !== undefined && p.score < 90).length;
+  const pagesBelowScore90 = adjDist.below90;
 
   // Cover: brand logo or fallback text
   const coverLogo = brand
@@ -1023,10 +1056,10 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
 
     <h3>Score Distribution</h3>
     <div class="score-dist-grid">
-      <div class="sd-cell sd-green"><span class="sd-count">${summary?.pagesAbove90 ?? 0}</span><span class="sd-label">Score ≥90</span></div>
-      <div class="sd-cell sd-lime"><span class="sd-count">${summary?.pages70to89 ?? 0}</span><span class="sd-label">Score 70–89</span></div>
-      <div class="sd-cell sd-amber"><span class="sd-count">${summary?.pages50to69 ?? 0}</span><span class="sd-label">Score 50–69</span></div>
-      <div class="sd-cell sd-red"><span class="sd-count">${summary?.pagesBelow50 ?? 0}</span><span class="sd-label">Score &lt;50</span></div>
+      <div class="sd-cell sd-green"><span class="sd-count">${adjDist.above90}</span><span class="sd-label">Score ≥90</span></div>
+      <div class="sd-cell sd-lime"><span class="sd-count">${adjDist.p70to89}</span><span class="sd-label">Score 70–89</span></div>
+      <div class="sd-cell sd-amber"><span class="sd-count">${adjDist.p50to69}</span><span class="sd-label">Score 50–69</span></div>
+      <div class="sd-cell sd-red"><span class="sd-count">${adjDist.below50}</span><span class="sd-label">Score &lt;50</span></div>
     </div>
 
     <!-- Top Issues -->
@@ -1065,10 +1098,11 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
       const ignoredOnPage = (page.issues || []).filter(i =>  ignoredSet.has(`${page.url}::${i.id}`));
       const hasActive  = activeIssues.length > 0;
       const hasIgnored = ignoredOnPage.length > 0;
+      const ps = computeAdjustedScore(page, ignoredSet);
       return `
       <div class="page-section">
-        <div class="page-header ${hasActive ? 'has-issues' : ''}" style="background:${scoreBg(page.score)};border:1px solid ${scoreColor(page.score)}33">
-          <span class="page-score-badge" style="color:${scoreColor(page.score)};background:${scoreBg(page.score)}">${page.score ?? 'ERR'}</span>
+        <div class="page-header ${hasActive ? 'has-issues' : ''}" style="background:${scoreBg(ps)};border:1px solid ${scoreColor(ps)}33">
+          <span class="page-score-badge" style="color:${scoreColor(ps)};background:${scoreBg(ps)}">${ps ?? 'ERR'}</span>
           <span class="page-url">${escapeHtml(page.url)}</span>
           ${hasActive
             ? `<span class="issue-count-label">${activeIssues.length} issue${activeIssues.length !== 1 ? 's' : ''}</span>`

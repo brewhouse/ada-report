@@ -711,11 +711,33 @@ async function loadIgnoredIssues(siteUrl) {
     }
     updateIgnoredStat();
     updateHeaderStats();
+    if (currentSession) renderPagesList(currentSession.pages);
     if (selectedPageUrl && currentSession) {
       const page = currentSession.pages.find(p => p.url === selectedPageUrl);
       if (page) renderIssues(page.issues || []);
     }
   } catch {}
+}
+
+// Proportionally boost a page score based on fraction of ignored issues.
+// All issues ignored → 100.  None ignored → original score unchanged.
+function adjustedPageScore(page) {
+  if (page.score === null || page.score === undefined) return page.score;
+  const issues = page.issues || [];
+  if (!issues.length) return page.score;
+  const ignored = issues.filter(i => ignoredIssues.has(`${page.url}::${i.id}`)).length;
+  if (!ignored) return page.score;
+  return Math.min(100, Math.round(page.score + (100 - page.score) * (ignored / issues.length)));
+}
+
+// Compute adjusted average score across all completed pages in the current session.
+function computeAdjustedAverage() {
+  if (!currentSession?.pages) return null;
+  const scores = currentSession.pages
+    .filter(p => p.status === 'completed')
+    .map(p => adjustedPageScore(p))
+    .filter(s => s !== null && s !== undefined);
+  return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
 }
 
 // Count ignored issues that actually appear in the current session's pages.
@@ -741,7 +763,7 @@ function updateIgnoredStat() {
   if (el) el.textContent = ig.total;
 }
 
-// Recompute all five header stats subtracting ignored issues.
+// Recompute all five header stats subtracting ignored issues, and update the score gauge.
 function updateHeaderStats() {
   if (!currentSession?.summary) return;
   const ig = countIgnoredInSession();
@@ -751,6 +773,8 @@ function updateHeaderStats() {
   document.getElementById('stat-serious').textContent   = Math.max(0, (s.seriousIssues  ?? 0) - ig.serious);
   document.getElementById('stat-moderate').textContent  = Math.max(0, (s.moderateIssues ?? 0) - ig.moderate);
   document.getElementById('stat-minor').textContent     = Math.max(0, (s.minorIssues    ?? 0) - ig.minor);
+  const adjAvg = computeAdjustedAverage();
+  if (adjAvg !== null) drawScoreGauge(document.getElementById('score-canvas'), adjAvg);
 }
 
 async function toggleIgnoreIssue(issue, pageUrl) {
@@ -777,6 +801,7 @@ async function toggleIgnoreIssue(issue, pageUrl) {
 
   updateIgnoredStat();
   updateHeaderStats();
+  if (currentSession) renderPagesList(currentSession.pages);
   const page = currentSession?.pages.find(p => p.url === pageUrl);
   if (page) renderIssues(page.issues || []);
 }
@@ -889,14 +914,15 @@ function renderPagesList(pages) {
   document.getElementById('page-count-badge').textContent = pages.length;
 
   list.innerHTML = sorted.map(page => {
-    const cls = scoreClass(page.score);
+    const adjScore = adjustedPageScore(page);
+    const cls = scoreClass(adjScore);
     const isError = page.status === 'error';
     const isRescanning = page.status === 'rescanning';
     const isActive = page.url === selectedPageUrl;
     return `<div class="page-item ${isError || isRescanning ? 'error-item' : ''} ${isActive ? 'active' : ''}"
         data-url="${escapeHtml(page.url)}">
       <span class="page-score-pill ${cls}">
-        ${isRescanning ? '…' : (page.score !== null && page.score !== undefined ? page.score : 'ERR')}
+        ${isRescanning ? '…' : (adjScore !== null && adjScore !== undefined ? adjScore : 'ERR')}
       </span>
       <span class="page-url-text" title="${escapeHtml(page.url)}">${escapeHtml(shortUrl(page.url))}</span>
       ${isRescanning
@@ -962,9 +988,10 @@ function selectPage(page) {
   // Header
   document.getElementById('issue-page-url').textContent = page.url;
   const scoreWrap = document.getElementById('issue-page-score');
-  const cls = scoreClass(page.score);
+  const adjScore = adjustedPageScore(page);
+  const cls = scoreClass(adjScore);
   scoreWrap.innerHTML = `<span class="page-score-pill ${cls}" style="font-size:18px;padding:4px 14px">
-    ${page.score !== null ? page.score + '/100' : 'Error'}
+    ${adjScore !== null ? adjScore + '/100' : 'Error'}
   </span>`;
 
   // Render issues
