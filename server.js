@@ -19,6 +19,7 @@ import {
 import {
   initDb, upsertSession, savePage, deletePageByUrl,
   loadSessionMetas, getFullSession, recomputeSummary, deleteOldSessions,
+  saveIgnoredIssue, removeIgnoredIssue, getIgnoredIssuesForSite,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
 
@@ -661,7 +662,8 @@ app.get('/api/audit/:id/report', async (req, res) => {
 
   const brand     = req.query.brand || null;
   const autoprint = req.query.autoprint === 'true';
-  const reportHtml = generateReport(session, brand, autoprint);
+  const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
+  const reportHtml = generateReport(session, brand, autoprint, ignoredIssuesList);
 
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
   const date   = new Date().toISOString().split('T')[0];
@@ -702,7 +704,8 @@ app.get('/api/audit/:id/report/summary', async (req, res) => {
 
   const brand     = req.query.brand || null;
   const autoprint = req.query.autoprint === 'true';
-  const reportHtml = generateSummaryReport(session, brand, autoprint);
+  const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
+  const reportHtml = generateSummaryReport(session, brand, autoprint, ignoredIssuesList);
 
   const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
   const date   = new Date().toISOString().split('T')[0];
@@ -806,9 +809,10 @@ app.post('/api/audit/:id/email', async (req, res) => {
   try {
     const session   = await getSessionForReport(req.params.id);
     const brandKey  = brand || null;
+    const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
     const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
-      generatePdfBuffer(generateSummaryReport(session, brandKey, false)),
-      generatePdfBuffer(generateReport(session, brandKey, false)),
+      generatePdfBuffer(generateSummaryReport(session, brandKey, false, ignoredIssuesList)),
+      generatePdfBuffer(generateReport(session, brandKey, false, ignoredIssuesList)),
       generatePdfBuffer(generateVpatReport(session, brandKey)),
     ]);
 
@@ -1084,6 +1088,48 @@ app.delete('/api/audit/:id', (req, res) => {
   }
 
   res.json({ success: true, id: session.id, wasActive, wasQueued });
+});
+
+// ── Ignored issues ─────────────────────────────────────────────────────────────
+
+// GET  /api/ignored-issues?siteUrl=https://example.com
+app.get('/api/ignored-issues', async (req, res) => {
+  const { siteUrl } = req.query;
+  if (!siteUrl) return res.status(400).json({ error: 'siteUrl is required' });
+  try {
+    const issues = await getIgnoredIssuesForSite(siteUrl);
+    res.json(issues);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ignored-issues  — mark an issue as ignored/visually verified
+app.post('/api/ignored-issues', async (req, res) => {
+  const { siteUrl, pageUrl, issueId, issueTitle, wcag, severity } = req.body;
+  if (!siteUrl || !pageUrl || !issueId) {
+    return res.status(400).json({ error: 'siteUrl, pageUrl, and issueId are required' });
+  }
+  try {
+    await saveIgnoredIssue({ siteUrl, pageUrl, issueId, issueTitle, wcag, severity });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/ignored-issues  — remove an ignore entry
+app.delete('/api/ignored-issues', async (req, res) => {
+  const { siteUrl, pageUrl, issueId } = req.body;
+  if (!siteUrl || !pageUrl || !issueId) {
+    return res.status(400).json({ error: 'siteUrl, pageUrl, and issueId are required' });
+  }
+  try {
+    await removeIgnoredIssue({ siteUrl, pageUrl, issueId });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Scheduler page

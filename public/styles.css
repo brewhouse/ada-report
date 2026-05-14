@@ -423,6 +423,7 @@ a:hover { text-decoration: underline; }
 .sev-dot.serious  { background: var(--orange); }
 .sev-dot.moderate { background: var(--warning); }
 .sev-dot.minor    { background: var(--blue); }
+.sev-dot.ignored  { background: #94a3b8; }
 
 /* Summary brand (results topbar) */
 .summary-brand {
@@ -541,6 +542,8 @@ a:hover { text-decoration: underline; }
 .filter-btn[data-severity="serious"].active  { background: var(--orange); border-color: var(--orange); }
 .filter-btn[data-severity="moderate"].active { background: var(--warning); border-color: var(--warning); }
 .filter-btn[data-severity="minor"].active    { background: var(--blue); border-color: var(--blue); }
+.filter-btn-ignored { color: #64748b; }
+.filter-btn[data-severity="ignored"].active { background: #64748b; border-color: #64748b; color: #fff; }
 
 /* Issues List */
 #issues-list { padding: 16px 20px; }
@@ -794,6 +797,18 @@ a:hover { text-decoration: underline; }
   margin-left: auto; flex-shrink: 0; transition: background 0.15s;
 }
 .btn-fix-issue:hover { background: #bbf7d0; }
+.btn-ignore-issue {
+  background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1;
+  padding: 3px 10px; border-radius: var(--radius); cursor: pointer;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;
+  flex-shrink: 0; transition: background 0.15s;
+}
+.btn-ignore-issue:hover { background: #e2e8f0; }
+.btn-ignore-issue.btn-unignore {
+  background: #fef9c3; color: #854d0e; border-color: #fde68a;
+}
+.btn-ignore-issue.btn-unignore:hover { background: #fef08a; }
+.issue-card-ignored { opacity: 0.75; background: #fefce8; }
 
 /* Result panel */
 .fix-result { padding: 16px 24px; border-top: 1px solid var(--border); }

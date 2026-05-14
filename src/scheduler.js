@@ -9,7 +9,7 @@ import { generateReport, generateSummaryReport, generateVpatReport } from './rep
 import {
   upsertScheduleToDb, deleteScheduleFromDb,
   loadSchedulesFromDb, patchScheduleInDb,
-  savePage, upsertSession,
+  savePage, upsertSession, getIgnoredIssuesForSite,
 } from './db.js';
 import { uploadReportPdfs } from './s3.js';
 
@@ -282,9 +282,11 @@ async function runScheduledAudit(scheduleId) {
       const domain = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
       const date   = new Date().toISOString().split('T')[0];
 
+      const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
+
       const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
-        generatePdfBuffer(generateSummaryReport(session, brand, false)),
-        generatePdfBuffer(generateReport(session, brand, false)),
+        generatePdfBuffer(generateSummaryReport(session, brand, false, ignoredIssuesList)),
+        generatePdfBuffer(generateReport(session, brand, false, ignoredIssuesList)),
         generatePdfBuffer(generateVpatReport(session, brand)),
       ]);
 
@@ -297,7 +299,7 @@ async function runScheduledAudit(scheduleId) {
       if (reportsDir) {
         try {
           const reportFilename = `${domain}-${date}-${session.id}.html`;
-          const reportHtml = generateReport(session, brand, false);
+          const reportHtml = generateReport(session, brand, false, ignoredIssuesList);
           await writeFile(join(reportsDir, reportFilename), reportHtml, 'utf8');
           console.log(`[scheduler] Detailed report saved locally: ${reportFilename}`);
         } catch (err) {

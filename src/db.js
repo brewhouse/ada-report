@@ -134,6 +134,25 @@ export async function initDb() {
       console.log('[db] Added missing column: audit_issues.wcag_level');
     }
 
+    // ignored_issues — persists issues marked as "ignored/visually verified"
+    // Keyed by (site_url, page_url, issue_id) so they survive re-scans.
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS ignored_issues (
+        id         INT           NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        site_url   VARCHAR(2048) NOT NULL,
+        page_url   VARCHAR(2048) NOT NULL,
+        issue_id   VARCHAR(150)  NOT NULL,
+        issue_title VARCHAR(1000),
+        wcag       VARCHAR(20),
+        severity   VARCHAR(20),
+        ignored_at DATETIME      DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ii_site    (site_url(191)),
+        INDEX idx_ii_page    (page_url(191)),
+        INDEX idx_ii_issue   (issue_id(150)),
+        UNIQUE KEY uk_ignored (site_url(191), page_url(191), issue_id(150))
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // schedules — replaces data/schedules.json
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS schedules (
@@ -619,6 +638,41 @@ export async function deleteScheduleFromDb(id) {
 export async function loadSchedulesFromDb() {
   const [rows] = await pool.execute('SELECT * FROM schedules ORDER BY created_at');
   return rows.map(rowToSchedule);
+}
+
+// ── Ignored issues helpers ────────────────────────────────────────────────────
+
+export async function saveIgnoredIssue({ siteUrl, pageUrl, issueId, issueTitle, wcag, severity }) {
+  await pool.execute(
+    `INSERT INTO ignored_issues (site_url, page_url, issue_id, issue_title, wcag, severity)
+     VALUES (?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE ignored_at = CURRENT_TIMESTAMP`,
+    [siteUrl, pageUrl, issueId, (issueTitle || '').substring(0, 1000), wcag || null, severity || null]
+  );
+}
+
+export async function removeIgnoredIssue({ siteUrl, pageUrl, issueId }) {
+  await pool.execute(
+    'DELETE FROM ignored_issues WHERE site_url = ? AND page_url = ? AND issue_id = ?',
+    [siteUrl, pageUrl, issueId]
+  );
+}
+
+// Returns all ignored issues for a given site URL (base domain match).
+export async function getIgnoredIssuesForSite(siteUrl) {
+  const [rows] = await pool.execute(
+    'SELECT * FROM ignored_issues WHERE site_url = ? ORDER BY page_url, issue_id',
+    [siteUrl]
+  );
+  return rows.map(r => ({
+    siteUrl:    r.site_url,
+    pageUrl:    r.page_url,
+    issueId:    r.issue_id,
+    issueTitle: r.issue_title,
+    wcag:       r.wcag,
+    severity:   r.severity,
+    ignoredAt:  r.ignored_at ? new Date(r.ignored_at).toISOString() : null,
+  }));
 }
 
 export async function patchScheduleInDb(id, fields) {

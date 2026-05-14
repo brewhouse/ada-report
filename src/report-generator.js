@@ -571,7 +571,7 @@ export function generateVpatReport(session, brandKey = null) {
 
 // brandKey: 'planeteria' | 'digitaldeployment' | 'pensionx' | null
 // autoprint: if true, adds a window.print() call on load
-export function generateSummaryReport(session, brandKey = null, autoprint = false) {
+export function generateSummaryReport(session, brandKey = null, autoprint = false, ignoredIssuesList = []) {
   const brand = BRANDS[brandKey] || null;
   const accentColor = brand?.accentColor || '#107DC2';
   const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
@@ -585,10 +585,15 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
   // Sort worst score first so clients see priority pages at top
   const sortedPages = [...completedPages].sort((a, b) => (a.score ?? 101) - (b.score ?? 101));
 
-  // Top issues across all pages (same logic as detail report)
+  // Build ignored lookup
+  const ignoredSet = new Set(ignoredIssuesList.map(i => `${i.pageUrl}::${i.issueId}`));
+  const ignoredCount = ignoredIssuesList.length;
+
+  // Top issues across all pages (exclude ignored)
   const issueFrequency = {};
   for (const page of completedPages) {
     for (const issue of (page.issues || [])) {
+      if (ignoredSet.has(`${page.url}::${issue.id}`)) continue;
       if (!issueFrequency[issue.id]) {
         issueFrequency[issue.id] = { ...issue, pageCount: 0, totalElements: 0 };
       }
@@ -718,6 +723,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
       <div class="sev-item"><div class="sev-dot" style="background:#ea580c"></div><strong>${summary?.seriousIssues ?? 0}</strong> Serious</div>
       <div class="sev-item"><div class="sev-dot" style="background:#d97706"></div><strong>${summary?.moderateIssues ?? 0}</strong> Moderate</div>
       <div class="sev-item"><div class="sev-dot" style="background:#2563eb"></div><strong>${summary?.minorIssues ?? 0}</strong> Minor</div>
+      ${ignoredCount > 0 ? `<div class="sev-item"><div class="sev-dot" style="background:#94a3b8"></div><strong>${ignoredCount}</strong> Ignored / Visually Verified</div>` : ''}
     </div>
 
     <h3>Score Distribution</h3>
@@ -827,7 +833,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
 
 // brandKey: 'planeteria' | 'digitaldeployment' | 'pensionx' | null
 // autoprint: if true, adds a window.print() call on load
-export function generateReport(session, brandKey = null, autoprint = false) {
+export function generateReport(session, brandKey = null, autoprint = false, ignoredIssuesList = []) {
   const brand = BRANDS[brandKey] || null;
   const accentColor = brand?.accentColor || '#107DC2';
   const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
@@ -840,10 +846,15 @@ export function generateReport(session, brandKey = null, autoprint = false) {
   const completedPages = pages.filter(p => p.status === 'completed');
   const sortedPages = [...completedPages].sort((a, b) => (a.score ?? 101) - (b.score ?? 101));
 
-  // Top issues across all pages
+  // Build a lookup set for ignored issues: "pageUrl::issueId"
+  const ignoredSet = new Set(ignoredIssuesList.map(i => `${i.pageUrl}::${i.issueId}`));
+  const ignoredCount = ignoredIssuesList.length;
+
+  // Top issues across all pages (exclude ignored)
   const issueFrequency = {};
   for (const page of completedPages) {
     for (const issue of (page.issues || [])) {
+      if (ignoredSet.has(`${page.url}::${issue.id}`)) continue;
       if (!issueFrequency[issue.id]) {
         issueFrequency[issue.id] = { ...issue, pageCount: 0, totalElements: 0 };
       }
@@ -972,6 +983,7 @@ export function generateReport(session, brandKey = null, autoprint = false) {
       <div class="sev-item"><div class="sev-dot" style="background:#ea580c"></div><strong>${summary?.seriousIssues ?? 0}</strong> Serious</div>
       <div class="sev-item"><div class="sev-dot" style="background:#d97706"></div><strong>${summary?.moderateIssues ?? 0}</strong> Moderate</div>
       <div class="sev-item"><div class="sev-dot" style="background:#2563eb"></div><strong>${summary?.minorIssues ?? 0}</strong> Minor</div>
+      ${ignoredCount > 0 ? `<div class="sev-item"><div class="sev-dot" style="background:#94a3b8"></div><strong>${ignoredCount}</strong> Ignored / Visually Verified</div>` : ''}
     </div>
 
     <h3>Score Distribution</h3>
@@ -1014,18 +1026,28 @@ export function generateReport(session, brandKey = null, autoprint = false) {
     <!-- Page-by-page Results -->
     <h2>Page-by-Page Results</h2>
     ${sortedPages.map(page => {
-      const hasIssues = page.issues && page.issues.length > 0;
+      const activeIssues  = (page.issues || []).filter(i => !ignoredSet.has(`${page.url}::${i.id}`));
+      const ignoredOnPage = (page.issues || []).filter(i =>  ignoredSet.has(`${page.url}::${i.id}`));
+      const hasActive  = activeIssues.length > 0;
+      const hasIgnored = ignoredOnPage.length > 0;
       return `
       <div class="page-section">
-        <div class="page-header ${hasIssues ? 'has-issues' : ''}" style="background:${scoreBg(page.score)};border:1px solid ${scoreColor(page.score)}33">
+        <div class="page-header ${hasActive ? 'has-issues' : ''}" style="background:${scoreBg(page.score)};border:1px solid ${scoreColor(page.score)}33">
           <span class="page-score-badge" style="color:${scoreColor(page.score)};background:${scoreBg(page.score)}">${page.score ?? 'ERR'}</span>
           <span class="page-url">${escapeHtml(page.url)}</span>
-          ${hasIssues
-            ? `<span class="issue-count-label">${page.issueCount} issue${page.issueCount !== 1 ? 's' : ''}</span>`
+          ${hasActive
+            ? `<span class="issue-count-label">${activeIssues.length} issue${activeIssues.length !== 1 ? 's' : ''}</span>`
             : `<span class="no-issues-inline">&#10003; No accessibility issues detected.</span>`
           }
+          ${hasIgnored ? `<span style="font-size:10px;color:#64748b;margin-left:6px;">(${ignoredOnPage.length} ignored)</span>` : ''}
         </div>
-        ${hasIssues ? renderIssuesTable(page.issues) : ''}
+        ${hasActive ? renderIssuesTable(activeIssues) : ''}
+        ${hasIgnored ? `
+          <div style="padding:6px 10px;background:#fefce8;border:1px solid #fde68a;border-top:none;border-radius:0 0 5px 5px;">
+            <p style="margin:0 0 4px;font-size:10px;font-weight:700;color:#854d0e;">Ignored / Visually Verified (${ignoredOnPage.length}):</p>
+            ${ignoredOnPage.map(issue => `<span style="display:inline-block;margin:2px 4px 2px 0;padding:1px 8px;background:#fef9c3;border:1px solid #fde68a;border-radius:3px;font-size:10px;color:#713f12;">${escapeHtml(issue.title)}</span>`).join('')}
+          </div>
+        ` : ''}
       </div>`;
     }).join('')}
 
