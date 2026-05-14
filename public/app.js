@@ -710,6 +710,7 @@ async function loadIgnoredIssues(siteUrl) {
       ignoredIssues.set(`${item.pageUrl}::${item.issueId}`, item);
     }
     updateIgnoredStat();
+    updateHeaderStats();
     if (selectedPageUrl && currentSession) {
       const page = currentSession.pages.find(p => p.url === selectedPageUrl);
       if (page) renderIssues(page.issues || []);
@@ -717,9 +718,39 @@ async function loadIgnoredIssues(siteUrl) {
   } catch {}
 }
 
+// Count ignored issues that actually appear in the current session's pages.
+// More accurate than ignoredIssues.size (which includes other scans of the same site).
+function countIgnoredInSession() {
+  const counts = { total: 0, critical: 0, serious: 0, moderate: 0, minor: 0 };
+  if (!currentSession?.pages) return counts;
+  for (const page of currentSession.pages) {
+    for (const issue of (page.issues || [])) {
+      if (ignoredIssues.has(`${page.url}::${issue.id}`)) {
+        counts.total++;
+        if (issue.severity in counts) counts[issue.severity]++;
+      }
+    }
+  }
+  return counts;
+}
+
+// Update the "Ignored" stat chip and subtract ignored from the header totals.
 function updateIgnoredStat() {
+  const ig = countIgnoredInSession();
   const el = document.getElementById('stat-ignored');
-  if (el) el.textContent = ignoredIssues.size;
+  if (el) el.textContent = ig.total;
+}
+
+// Recompute all five header stats subtracting ignored issues.
+function updateHeaderStats() {
+  if (!currentSession?.summary) return;
+  const ig = countIgnoredInSession();
+  const s  = currentSession.summary;
+  document.getElementById('stat-issues').textContent    = Math.max(0, (s.totalIssues    ?? 0) - ig.total);
+  document.getElementById('stat-critical').textContent  = Math.max(0, (s.criticalIssues ?? 0) - ig.critical);
+  document.getElementById('stat-serious').textContent   = Math.max(0, (s.seriousIssues  ?? 0) - ig.serious);
+  document.getElementById('stat-moderate').textContent  = Math.max(0, (s.moderateIssues ?? 0) - ig.moderate);
+  document.getElementById('stat-minor').textContent     = Math.max(0, (s.minorIssues    ?? 0) - ig.minor);
 }
 
 async function toggleIgnoreIssue(issue, pageUrl) {
@@ -745,6 +776,7 @@ async function toggleIgnoreIssue(issue, pageUrl) {
   }
 
   updateIgnoredStat();
+  updateHeaderStats();
   const page = currentSession?.pages.find(p => p.url === pageUrl);
   if (page) renderIssues(page.issues || []);
 }
@@ -1015,7 +1047,8 @@ function renderIssues(issues) {
     return;
   }
 
-  if (!filtered.length) {
+  // In "all" view, still render even if no active issues — there may be ignored ones to show
+  if (!filtered.length && !(currentFilter === 'all' && ignoredOnPage.length > 0)) {
     const label = currentFilter === 'ignored' ? 'ignored' : currentFilter;
     list.innerHTML = `<div class="no-issues">
       <p>No ${label} issues on this page.</p>
@@ -1023,9 +1056,7 @@ function renderIssues(issues) {
     return;
   }
 
-  list.innerHTML = filtered.map(issue => {
-    const isIgnored = currentFilter === 'ignored';
-    return `
+  const buildCard = (issue, isIgnored) => `
     <div class="issue-card${isIgnored ? ' issue-card-ignored' : ''}">
       <div class="issue-card-header">
         <span class="sev-tag ${issue.severity}">${escapeHtml(issue.severity)}</span>
@@ -1058,7 +1089,18 @@ function renderIssues(issues) {
         ` : ''}
       </div>
     </div>`;
-  }).join('');
+
+  let html = filtered.map(issue => buildCard(issue, currentFilter === 'ignored')).join('');
+
+  // In "all" view, show ignored issues at the bottom with a separator so users can un-ignore them
+  // without needing to know about the "Ignored" filter tab.
+  if (currentFilter === 'all' && ignoredOnPage.length > 0) {
+    html += `<div class="ignored-inline-divider">
+      <span>Ignored / Visually Verified &mdash; ${ignoredOnPage.length} issue${ignoredOnPage.length !== 1 ? 's' : ''}</span>
+    </div>` + ignoredOnPage.map(issue => buildCard(issue, true)).join('');
+  }
+
+  list.innerHTML = html;
 
   // Attach Fix button handlers
   list.querySelectorAll('.btn-fix-issue').forEach(btn => {

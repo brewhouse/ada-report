@@ -84,8 +84,10 @@ async function fetchXml(url) {
     if (typeof res.data === 'string' && res.data.trim().startsWith('<')) {
       return res.data;
     }
+    console.warn(`[crawler] fetchXml(${url}): unexpected response type=${typeof res.data}, status=${res.status}, content-type=${res.headers['content-type']}`);
     return null;
-  } catch {
+  } catch (err) {
+    console.warn(`[crawler] fetchXml(${url}): ${err.code || err.message}`);
     return null;
   }
 }
@@ -105,6 +107,10 @@ async function parseSitemap(xml, origin, depth = 0) {
   if (childSitemaps.length > 0) {
     // Fetch all child sitemaps in parallel for faster discovery.
     const childXmls = await Promise.all(childSitemaps.map(u => fetchXml(u)));
+    const failedCount = childXmls.filter(x => !x).length;
+    if (failedCount > 0) {
+      console.warn(`[crawler] parseSitemap: ${failedCount}/${childSitemaps.length} child sitemap(s) failed to load`);
+    }
     const childResults = await Promise.all(
       childXmls.map(xml => parseSitemap(xml, origin, depth + 1))
     );
@@ -172,8 +178,10 @@ async function discoverFromSitemap(rootUrl) {
       console.log(`[crawler] Sitemap found at ${candidate} — ${urls.length} URLs`);
       return urls;
     }
+    console.warn(`[crawler] Sitemap at ${candidate} fetched but yielded 0 URLs`);
   }
 
+  console.warn(`[crawler] No sitemap candidates succeeded for ${origin} — falling back to browser crawl`);
   return [];
 }
 
@@ -248,7 +256,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
         }
       }
     } catch (err) {
-      if (process.env.DEBUG) console.warn(`[crawler] skip ${url}: ${err.message}`);
+      console.warn(`[crawler] browser skip ${url}: ${err.message}`);
     } finally {
       await page.close().catch(() => {});
     }

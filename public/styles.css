@@ -809,6 +809,14 @@ a:hover { text-decoration: underline; }
 }
 .btn-ignore-issue.btn-unignore:hover { background: #fef08a; }
 .issue-card-ignored { opacity: 0.75; background: #fefce8; }
+.ignored-inline-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 20px 0 12px; color: #92400e; font-size: 12px; font-weight: 600;
+}
+.ignored-inline-divider::before,
+.ignored-inline-divider::after {
+  content: ''; flex: 1; height: 1px; background: #fde68a;
+}
 
 /* Result panel */
 .fix-result { padding: 16px 24px; border-top: 1px solid var(--border); }
