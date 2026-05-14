@@ -197,7 +197,7 @@ const LIGHTHOUSE_TESTED_WCAG = new Set([
   '3.2.3', '2.4.5',
 ]);
 
-export function generateVpatReport(session, brandKey = null) {
+export function generateVpatReport(session, brandKey = null, ignoredIssuesList = []) {
   const brand = BRANDS[brandKey] || null;
   const accentColor = brand?.accentColor || '#107DC2';
   const brandName = brand?.name || 'Planeteria Inquiros ADA Checker';
@@ -215,11 +215,19 @@ export function generateVpatReport(session, brandKey = null) {
   const completedPages = pages.filter(p => p.status === 'completed');
   const totalAudited = completedPages.length;
 
-  // Aggregate issues by WCAG criterion across all pages
+  const ignoredSet = new Set(ignoredIssuesList.map(i => `${i.pageUrl}::${i.issueId}`));
+  // Count ignored issues that actually appear in this session
+  let ignoredInSession = 0;
+  for (const page of completedPages)
+    for (const issue of (page.issues || []))
+      if (ignoredSet.has(`${page.url}::${issue.id}`)) ignoredInSession++;
+
+  // Aggregate active issues by WCAG criterion across all pages (ignored issues excluded)
   const issuesByWcag = {};
   for (const page of completedPages) {
     const pageWcagSeen = new Set();
     for (const issue of (page.issues || [])) {
+      if (ignoredSet.has(`${page.url}::${issue.id}`)) continue;
       const key = issue.wcag;
       if (!key || key === 'N/A') continue;
       if (!issuesByWcag[key]) {
@@ -426,7 +434,7 @@ export function generateVpatReport(session, brandKey = null) {
     <!-- Evaluation Methods -->
     <h2>Evaluation Methods Used</h2>
     <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>Axe Tools</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
-    <p style="margin-top:5px;">Overall results: Average score <strong>${summary?.averageScore ?? 'N/A'}/100</strong> &bull; ${(summary?.totalIssues ?? 0).toLocaleString()} total issues found &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
+    <p style="margin-top:5px;">Overall results: Average score <strong>${summary?.averageScore ?? 'N/A'}/100</strong> &bull; ${Math.max(0, (summary?.totalIssues ?? 0) - ignoredInSession).toLocaleString()} active issues found${ignoredInSession > 0 ? ` (${ignoredInSession} ignored / visually verified)` : ''} &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
 
     <!-- Applicable Standards -->
     <h2>Applicable Standards / Guidelines</h2>
@@ -585,9 +593,19 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
   // Sort worst score first so clients see priority pages at top
   const sortedPages = [...completedPages].sort((a, b) => (a.score ?? 101) - (b.score ?? 101));
 
-  // Build ignored lookup
+  // Build ignored lookup and per-severity counts for this session
   const ignoredSet = new Set(ignoredIssuesList.map(i => `${i.pageUrl}::${i.issueId}`));
-  const ignoredCount = ignoredIssuesList.length;
+  let ignoredTotal = 0, ignoredCritical = 0, ignoredSerious = 0, ignoredModerate = 0, ignoredMinor = 0;
+  for (const page of completedPages) {
+    for (const issue of (page.issues || [])) {
+      if (!ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      ignoredTotal++;
+      if      (issue.severity === 'critical') ignoredCritical++;
+      else if (issue.severity === 'serious')  ignoredSerious++;
+      else if (issue.severity === 'moderate') ignoredModerate++;
+      else if (issue.severity === 'minor')    ignoredMinor++;
+    }
+  }
 
   // Top issues across all pages (exclude ignored)
   const issueFrequency = {};
@@ -610,7 +628,10 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
 
   const avgScore = summary?.averageScore ?? 0;
   const avgColor = scoreColor(avgScore);
-  const pagesNoIssues = completedPages.filter(p => !p.issues || p.issues.length === 0).length;
+  const pagesNoIssues = completedPages.filter(p => {
+    const active = (p.issues || []).filter(i => !ignoredSet.has(`${p.url}::${i.id}`)).length;
+    return active === 0;
+  }).length;
   const pagesBelowScore90 = completedPages.filter(p => p.score !== null && p.score !== undefined && p.score < 90).length;
 
   const coverLogo = brand
@@ -704,7 +725,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
         <div class="label">Pages Audited</div>
       </div>
       <div class="stat-card">
-        <div class="value">${summary?.totalIssues ?? 0}</div>
+        <div class="value">${Math.max(0, (summary?.totalIssues ?? 0) - ignoredTotal)}</div>
         <div class="label">Total Issues</div>
       </div>
       <div class="stat-card">
@@ -719,11 +740,11 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
 
     <h3>Issues by Severity</h3>
     <div class="severity-bar">
-      <div class="sev-item"><div class="sev-dot" style="background:#dc2626"></div><strong>${summary?.criticalIssues ?? 0}</strong> Critical</div>
-      <div class="sev-item"><div class="sev-dot" style="background:#ea580c"></div><strong>${summary?.seriousIssues ?? 0}</strong> Serious</div>
-      <div class="sev-item"><div class="sev-dot" style="background:#d97706"></div><strong>${summary?.moderateIssues ?? 0}</strong> Moderate</div>
-      <div class="sev-item"><div class="sev-dot" style="background:#2563eb"></div><strong>${summary?.minorIssues ?? 0}</strong> Minor</div>
-      ${ignoredCount > 0 ? `<div class="sev-item"><div class="sev-dot" style="background:#94a3b8"></div><strong>${ignoredCount}</strong> Ignored / Visually Verified</div>` : ''}
+      <div class="sev-item"><div class="sev-dot" style="background:#dc2626"></div><strong>${Math.max(0, (summary?.criticalIssues ?? 0) - ignoredCritical)}</strong> Critical</div>
+      <div class="sev-item"><div class="sev-dot" style="background:#ea580c"></div><strong>${Math.max(0, (summary?.seriousIssues ?? 0) - ignoredSerious)}</strong> Serious</div>
+      <div class="sev-item"><div class="sev-dot" style="background:#d97706"></div><strong>${Math.max(0, (summary?.moderateIssues ?? 0) - ignoredModerate)}</strong> Moderate</div>
+      <div class="sev-item"><div class="sev-dot" style="background:#2563eb"></div><strong>${Math.max(0, (summary?.minorIssues ?? 0) - ignoredMinor)}</strong> Minor</div>
+      ${ignoredTotal > 0 ? `<div class="sev-item"><div class="sev-dot" style="background:#94a3b8"></div><strong>${ignoredTotal}</strong> Ignored / Visually Verified</div>` : ''}
     </div>
 
     <h3>Score Distribution</h3>
@@ -781,11 +802,12 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
       </thead>
       <tbody>
         ${sortedPages.map(page => {
-          const crit = page.issues?.filter(i => i.severity === 'critical').length ?? 0;
-          const ser  = page.issues?.filter(i => i.severity === 'serious').length ?? 0;
-          const mod  = page.issues?.filter(i => i.severity === 'moderate').length ?? 0;
-          const min  = page.issues?.filter(i => i.severity === 'minor').length ?? 0;
-          const noIssues = page.issueCount === 0;
+          const ai   = (page.issues || []).filter(i => !ignoredSet.has(`${page.url}::${i.id}`));
+          const crit = ai.filter(i => i.severity === 'critical').length;
+          const ser  = ai.filter(i => i.severity === 'serious').length;
+          const mod  = ai.filter(i => i.severity === 'moderate').length;
+          const min  = ai.filter(i => i.severity === 'minor').length;
+          const noIssues = ai.length === 0;
           return `
           <tr>
             <td style="word-break:break-all;font-size:10px;">${escapeHtml(page.url)}</td>
@@ -793,7 +815,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
               <span class="score-pill" style="color:${scoreColor(page.score)};background:${scoreBg(page.score)}">${page.score ?? 'N/A'}</span>
             </td>
             <td style="text-align:center;font-weight:${noIssues ? '400' : '700'};color:${noIssues ? '#16a34a' : '#1e293b'}">
-              ${noIssues ? '&#10003;' : page.issueCount}
+              ${noIssues ? '&#10003;' : ai.length}
             </td>
             <td style="text-align:center;color:#dc2626;font-weight:${crit > 0 ? '700' : '400'}">${crit > 0 ? crit : '—'}</td>
             <td style="text-align:center;color:#ea580c;font-weight:${ser > 0 ? '700' : '400'}">${ser > 0 ? ser : '—'}</td>
@@ -848,7 +870,17 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
 
   // Build a lookup set for ignored issues: "pageUrl::issueId"
   const ignoredSet = new Set(ignoredIssuesList.map(i => `${i.pageUrl}::${i.issueId}`));
-  const ignoredCount = ignoredIssuesList.length;
+  let ignoredTotal = 0, ignoredCritical = 0, ignoredSerious = 0, ignoredModerate = 0, ignoredMinor = 0;
+  for (const page of completedPages) {
+    for (const issue of (page.issues || [])) {
+      if (!ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      ignoredTotal++;
+      if      (issue.severity === 'critical') ignoredCritical++;
+      else if (issue.severity === 'serious')  ignoredSerious++;
+      else if (issue.severity === 'moderate') ignoredModerate++;
+      else if (issue.severity === 'minor')    ignoredMinor++;
+    }
+  }
 
   // Top issues across all pages (exclude ignored)
   const issueFrequency = {};
@@ -872,7 +904,10 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
   const avgScore = summary?.averageScore ?? 0;
   const avgColor = scoreColor(avgScore);
 
-  const pagesNoIssues = completedPages.filter(p => !p.issues || p.issues.length === 0).length;
+  const pagesNoIssues = completedPages.filter(p => {
+    const active = (p.issues || []).filter(i => !ignoredSet.has(`${p.url}::${i.id}`)).length;
+    return active === 0;
+  }).length;
   const pagesBelowScore90 = completedPages.filter(p => p.score !== null && p.score !== undefined && p.score < 90).length;
 
   // Cover: brand logo or fallback text
@@ -964,7 +999,7 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
         <div class="label">Pages Audited</div>
       </div>
       <div class="stat-card">
-        <div class="value">${summary?.totalIssues ?? 0}</div>
+        <div class="value">${Math.max(0, (summary?.totalIssues ?? 0) - ignoredTotal)}</div>
         <div class="label">Total Issues</div>
       </div>
       <div class="stat-card">
@@ -979,11 +1014,11 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
 
     <h3>Issues by Severity</h3>
     <div class="severity-bar">
-      <div class="sev-item"><div class="sev-dot" style="background:#dc2626"></div><strong>${summary?.criticalIssues ?? 0}</strong> Critical</div>
-      <div class="sev-item"><div class="sev-dot" style="background:#ea580c"></div><strong>${summary?.seriousIssues ?? 0}</strong> Serious</div>
-      <div class="sev-item"><div class="sev-dot" style="background:#d97706"></div><strong>${summary?.moderateIssues ?? 0}</strong> Moderate</div>
-      <div class="sev-item"><div class="sev-dot" style="background:#2563eb"></div><strong>${summary?.minorIssues ?? 0}</strong> Minor</div>
-      ${ignoredCount > 0 ? `<div class="sev-item"><div class="sev-dot" style="background:#94a3b8"></div><strong>${ignoredCount}</strong> Ignored / Visually Verified</div>` : ''}
+      <div class="sev-item"><div class="sev-dot" style="background:#dc2626"></div><strong>${Math.max(0, (summary?.criticalIssues ?? 0) - ignoredCritical)}</strong> Critical</div>
+      <div class="sev-item"><div class="sev-dot" style="background:#ea580c"></div><strong>${Math.max(0, (summary?.seriousIssues ?? 0) - ignoredSerious)}</strong> Serious</div>
+      <div class="sev-item"><div class="sev-dot" style="background:#d97706"></div><strong>${Math.max(0, (summary?.moderateIssues ?? 0) - ignoredModerate)}</strong> Moderate</div>
+      <div class="sev-item"><div class="sev-dot" style="background:#2563eb"></div><strong>${Math.max(0, (summary?.minorIssues ?? 0) - ignoredMinor)}</strong> Minor</div>
+      ${ignoredTotal > 0 ? `<div class="sev-item"><div class="sev-dot" style="background:#94a3b8"></div><strong>${ignoredTotal}</strong> Ignored / Visually Verified</div>` : ''}
     </div>
 
     <h3>Score Distribution</h3>

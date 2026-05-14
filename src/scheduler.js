@@ -287,7 +287,7 @@ async function runScheduledAudit(scheduleId) {
       const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
         generatePdfBuffer(generateSummaryReport(session, brand, false, ignoredIssuesList)),
         generatePdfBuffer(generateReport(session, brand, false, ignoredIssuesList)),
-        generatePdfBuffer(generateVpatReport(session, brand)),
+        generatePdfBuffer(generateVpatReport(session, brand, ignoredIssuesList)),
       ]);
 
       // Upload to S3 for persistent access.

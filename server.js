@@ -702,7 +702,8 @@ app.get('/api/audit/:id/report/vpat', async (req, res) => {
   const session = await getSessionForReport(req.params.id);
   if (!session) return res.status(404).json({ error: 'Audit not found' });
 
-  const reportHtml = generateVpatReport(session, req.query.brand || null);
+  const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
+  const reportHtml = generateVpatReport(session, req.query.brand || null, ignoredIssuesList);
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(reportHtml);
 });
@@ -829,7 +830,7 @@ app.post('/api/audit/:id/email', async (req, res) => {
     const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
       generatePdfBuffer(generateSummaryReport(session, brandKey, false, ignoredIssuesList)),
       generatePdfBuffer(generateReport(session, brandKey, false, ignoredIssuesList)),
-      generatePdfBuffer(generateVpatReport(session, brandKey)),
+      generatePdfBuffer(generateVpatReport(session, brandKey, ignoredIssuesList)),
     ]);
 
     const domain   = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
