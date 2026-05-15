@@ -354,7 +354,7 @@
             <div class="sev-row"><span class="sev-dot serious"></span><span id="stat-serious">0</span> Serious</div>
             <div class="sev-row"><span class="sev-dot moderate"></span><span id="stat-moderate">0</span> Moderate</div>
             <div class="sev-row"><span class="sev-dot minor"></span><span id="stat-minor">0</span> Minor</div>
-            <div class="sev-row"><span class="sev-dot ignored"></span><span id="stat-ignored">0</span> Ignored</div>
+            <div class="sev-row"><span class="sev-dot ignored"></span><span id="stat-ignored">0</span> Ignored <button id="btn-review-ignored" class="btn-review-ignored" style="display:none" title="Review all ignored issues">Review</button></div>
           </div>
         </div>
         <div class="summary-brand">
@@ -410,6 +410,19 @@
 
     <!-- Supplemental Results Sections (forms, iframes, broken links) -->
     <div id="supplemental-sections" style="padding:0 24px 24px;max-width:1400px;margin:0 auto"></div>
+  </div>
+
+  <!-- ======================== IGNORED ISSUES MODAL ======================== -->
+  <div id="ignored-issues-modal" class="modal-overlay" style="display:none" role="dialog" aria-modal="true">
+    <div class="modal-box" style="max-width:720px;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+      <div class="modal-header">
+        <h3 class="modal-title">Ignored / Visually Verified Issues</h3>
+        <button class="modal-close-btn" id="ignored-modal-close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="ignored-modal-body" style="overflow-y:auto;flex:1;padding:8px 0 4px"></div>
+    </div>
   </div>
 
   <!-- ======================== SUMMARY BRAND MODAL ======================== -->

@@ -535,7 +535,7 @@ function updateProgress(session) {
             : p.status === 'error'
               ? `<span class="p-score-badge score-red">Error</span>`
               : ''}
-        ${p.issueCount > 0 ? `<span style="font-size:11px;color:#64748b">${p.issueCount} issues</span>` : ''}
+        ${p.issueCount > 0 ? `<span style="font-size:11px;color:#64748b">${activeIssueCount(p)} issues</span>` : ''}
       </div>`;
     }).join('');
     listEl.scrollTop = listEl.scrollHeight;
@@ -756,11 +756,78 @@ function countIgnoredInSession() {
   return counts;
 }
 
+// Count ignored issues on a specific page (fast — no need to load page.issues).
+function ignoredCountForPage(pageUrl) {
+  let count = 0;
+  for (const key of ignoredIssues.keys()) {
+    if (key.startsWith(pageUrl + '::')) count++;
+  }
+  return count;
+}
+
+// Return the number of active (non-ignored) issues for a page.
+function activeIssueCount(page) {
+  const total = page.issueCount || 0;
+  return Math.max(0, total - ignoredCountForPage(page.url));
+}
+
 // Update the "Ignored" stat chip and subtract ignored from the header totals.
 function updateIgnoredStat() {
   const ig = countIgnoredInSession();
   const el = document.getElementById('stat-ignored');
   if (el) el.textContent = ig.total;
+  const btn = document.getElementById('btn-review-ignored');
+  if (btn) btn.style.display = ig.total > 0 ? 'inline' : 'none';
+}
+
+function openIgnoredModal() {
+  const body = document.getElementById('ignored-modal-body');
+  const severityLabel = { critical: 'Critical', serious: 'Serious', moderate: 'Moderate', minor: 'Minor' };
+  const severityDot = s => `<span class="sev-dot ${s}" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle"></span>`;
+
+  // Group ignored issues by page URL using the map as source of truth.
+  const byPage = new Map();
+  for (const [key, item] of ignoredIssues) {
+    if (!byPage.has(item.pageUrl)) byPage.set(item.pageUrl, []);
+    byPage.get(item.pageUrl).push(item);
+  }
+
+  const sections = [];
+  for (const [pageUrl, items] of byPage) {
+    const rows = items.map(item => `
+      <div class="ignored-modal-row" style="display:flex;align-items:flex-start;gap:8px;padding:8px 16px;border-bottom:1px solid #f1f5f9">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;color:#1e293b">${escapeHtml(item.issueTitle || item.issueId)}</div>
+          ${item.wcag ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${escapeHtml(item.wcag)}</div>` : ''}
+          <div style="margin-top:3px">${severityDot(item.severity)}<span style="font-size:11px;color:#64748b">${severityLabel[item.severity] || item.severity || ''}</span></div>
+        </div>
+        <button class="btn-unignore-modal btn-ignore-issue btn-unignore" data-page-url="${escapeHtml(pageUrl)}" data-issue-id="${escapeHtml(item.issueId)}" style="flex-shrink:0;margin-top:2px">Un-ignore</button>
+      </div>`).join('');
+    sections.push(`
+      <div style="margin-bottom:4px">
+        <div style="padding:8px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:600;color:#475569;word-break:break-all">${escapeHtml(shortUrl(pageUrl))}</div>
+        ${rows}
+      </div>`);
+  }
+
+  if (!sections.length) {
+    body.innerHTML = `<p style="padding:24px 16px;color:#64748b;text-align:center">No ignored issues.</p>`;
+  } else {
+    body.innerHTML = sections.join('');
+    body.querySelectorAll('.btn-unignore-modal').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const item = ignoredIssues.get(`${btn.dataset.pageUrl}::${btn.dataset.issueId}`);
+        if (!item) return;
+        await toggleIgnoreIssue(
+          { id: item.issueId, title: item.issueTitle, wcag: item.wcag, severity: item.severity },
+          btn.dataset.pageUrl
+        );
+        openIgnoredModal();
+      });
+    });
+  }
+
+  openModal('ignored-issues-modal');
 }
 
 // Recompute all five header stats subtracting ignored issues, and update the score gauge.
@@ -929,7 +996,7 @@ function renderPagesList(pages) {
         ? `<span class="rescan-scanning-label">Scanning…</span>`
         : isError
           ? `<button class="rescan-btn" data-url="${escapeHtml(page.url)}" title="Re-audit this page">↺ Rescan</button>`
-          : `<span class="page-issue-count">${page.issueCount} issues</span>`
+          : `<span class="page-issue-count">${activeIssueCount(page)} issues</span>`
       }
     </div>`;
   }).join('');
@@ -964,7 +1031,7 @@ function sortPages(pages, sortBy) {
         return b.score - a.score;
       });
     case 'issues-desc':
-      return pages.sort((a, b) => (b.issueCount ?? 0) - (a.issueCount ?? 0));
+      return pages.sort((a, b) => activeIssueCount(b) - activeIssueCount(a));
     case 'alpha':
       return pages.sort((a, b) => a.url.localeCompare(b.url));
     default:
@@ -1233,6 +1300,9 @@ document.querySelectorAll('#brand-modal .brand-option-card').forEach(card => {
 });
 
 document.getElementById('brand-modal-close').addEventListener('click', () => closeModal('brand-modal'));
+
+document.getElementById('btn-review-ignored').addEventListener('click', openIgnoredModal);
+document.getElementById('ignored-modal-close').addEventListener('click', () => closeModal('ignored-issues-modal'));
 
 // Email Report button — opens email modal
 document.getElementById('email-report-btn').addEventListener('click', () => {
