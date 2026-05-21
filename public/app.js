@@ -767,8 +767,14 @@ function ignoredCountForPage(pageUrl) {
 
 // Return the number of active (non-ignored) issues for a page.
 function activeIssueCount(page) {
-  const total = page.issueCount || 0;
-  return Math.max(0, total - ignoredCountForPage(page.url));
+  // Prefer the actual loaded issue array — it's always accurate even when
+  // the stored issueCount counter is stale (e.g. after consistency-check additions).
+  if (page.issues && page.issues.length > 0) {
+    return page.issues.filter(i => !ignoredIssues.has(`${page.url}::${i.id}`)).length;
+  }
+  // Fall back to stored counter minus ignored count (used during live scans
+  // before issue detail arrays are available).
+  return Math.max(0, (page.issueCount || 0) - ignoredCountForPage(page.url));
 }
 
 // Update the "Ignored" stat chip and subtract ignored from the header totals.
