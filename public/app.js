@@ -112,7 +112,13 @@ let scanningMode = false;
 let scanLivePageCount = 0;
 
 // Ignored issues — keyed by "${pageUrl}::${issueId}", value = {siteUrl, pageUrl, issueId, ...}
+// Site-wide (all-pages) ignores use the sentinel key "*::${issueId}".
 let ignoredIssues = new Map();
+
+// True if an issue on pageUrl is ignored — checks page-specific AND site-wide entries.
+function isIssueIgnored(pageUrl, issueId) {
+  return ignoredIssues.has(`${pageUrl}::${issueId}`) || ignoredIssues.has(`*::${issueId}`);
+}
 
 // ===================== VIEW MANAGEMENT =====================
 
@@ -725,7 +731,7 @@ function adjustedPageScore(page) {
   if (page.score === null || page.score === undefined) return page.score;
   const issues = page.issues || [];
   if (!issues.length) return page.score;
-  const ignored = issues.filter(i => ignoredIssues.has(`${page.url}::${i.id}`)).length;
+  const ignored = issues.filter(i => isIssueIgnored(page.url, i.id)).length;
   if (!ignored) return page.score;
   return Math.min(100, Math.round(page.score + (100 - page.score) * (ignored / issues.length)));
 }
@@ -747,7 +753,7 @@ function countIgnoredInSession() {
   if (!currentSession?.pages) return counts;
   for (const page of currentSession.pages) {
     for (const issue of (page.issues || [])) {
-      if (ignoredIssues.has(`${page.url}::${issue.id}`)) {
+      if (isIssueIgnored(page.url, issue.id)) {
         counts.total++;
         if (issue.severity in counts) counts[issue.severity]++;
       }
@@ -770,7 +776,7 @@ function activeIssueCount(page) {
   // Prefer the actual loaded issue array — it's always accurate even when
   // the stored issueCount counter is stale (e.g. after consistency-check additions).
   if (page.issues && page.issues.length > 0) {
-    return page.issues.filter(i => !ignoredIssues.has(`${page.url}::${i.id}`)).length;
+    return page.issues.filter(i => !isIssueIgnored(page.url, i.id)).length;
   }
   // Fall back to stored counter minus ignored count (used during live scans
   // before issue detail arrays are available).
@@ -791,28 +797,49 @@ function openIgnoredModal() {
   const severityLabel = { critical: 'Critical', serious: 'Serious', moderate: 'Moderate', minor: 'Minor' };
   const severityDot = s => `<span class="sev-dot ${s}" style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle"></span>`;
 
-  // Group ignored issues by page URL using the map as source of truth.
+  // Separate global (all-pages) entries from page-specific ones.
+  const globalItems = [];
   const byPage = new Map();
-  for (const [key, item] of ignoredIssues) {
-    if (!byPage.has(item.pageUrl)) byPage.set(item.pageUrl, []);
-    byPage.get(item.pageUrl).push(item);
+  for (const [, item] of ignoredIssues) {
+    if (item.pageUrl === '*') {
+      globalItems.push(item);
+    } else {
+      if (!byPage.has(item.pageUrl)) byPage.set(item.pageUrl, []);
+      byPage.get(item.pageUrl).push(item);
+    }
   }
 
+  const buildRow = (item, isGlobal) => `
+    <div class="ignored-modal-row" style="display:flex;align-items:flex-start;gap:8px;padding:8px 16px;border-bottom:1px solid #f1f5f9">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;color:#1e293b">${escapeHtml(item.issueTitle || item.issueId)}</div>
+        ${item.wcag ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${escapeHtml(item.wcag)}</div>` : ''}
+        <div style="margin-top:3px">${severityDot(item.severity)}<span style="font-size:11px;color:#64748b">${severityLabel[item.severity] || item.severity || ''}</span></div>
+      </div>
+      <button class="btn-unignore-modal btn-ignore-issue btn-unignore"
+        data-page-url="${escapeHtml(item.pageUrl)}"
+        data-issue-id="${escapeHtml(item.issueId)}"
+        data-is-global="${isGlobal ? '1' : ''}"
+        style="flex-shrink:0;margin-top:2px">Un-ignore${isGlobal ? ' (all pages)' : ''}</button>
+    </div>`;
+
   const sections = [];
-  for (const [pageUrl, items] of byPage) {
-    const rows = items.map(item => `
-      <div class="ignored-modal-row" style="display:flex;align-items:flex-start;gap:8px;padding:8px 16px;border-bottom:1px solid #f1f5f9">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500;color:#1e293b">${escapeHtml(item.issueTitle || item.issueId)}</div>
-          ${item.wcag ? `<div style="font-size:11px;color:#64748b;margin-top:2px">${escapeHtml(item.wcag)}</div>` : ''}
-          <div style="margin-top:3px">${severityDot(item.severity)}<span style="font-size:11px;color:#64748b">${severityLabel[item.severity] || item.severity || ''}</span></div>
+
+  if (globalItems.length) {
+    sections.push(`
+      <div style="margin-bottom:4px">
+        <div style="padding:8px 16px;background:#eff6ff;border-bottom:1px solid #bfdbfe;font-size:12px;font-weight:600;color:#1d4ed8">
+          All Pages (site-wide)
         </div>
-        <button class="btn-unignore-modal btn-ignore-issue btn-unignore" data-page-url="${escapeHtml(pageUrl)}" data-issue-id="${escapeHtml(item.issueId)}" style="flex-shrink:0;margin-top:2px">Un-ignore</button>
-      </div>`).join('');
+        ${globalItems.map(item => buildRow(item, true)).join('')}
+      </div>`);
+  }
+
+  for (const [pageUrl, items] of byPage) {
     sections.push(`
       <div style="margin-bottom:4px">
         <div style="padding:8px 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:600;color:#475569;word-break:break-all">${escapeHtml(shortUrl(pageUrl))}</div>
-        ${rows}
+        ${items.map(item => buildRow(item, false)).join('')}
       </div>`);
   }
 
@@ -822,12 +849,33 @@ function openIgnoredModal() {
     body.innerHTML = sections.join('');
     body.querySelectorAll('.btn-unignore-modal').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const item = ignoredIssues.get(`${btn.dataset.pageUrl}::${btn.dataset.issueId}`);
-        if (!item) return;
-        await toggleIgnoreIssue(
-          { id: item.issueId, title: item.issueTitle, wcag: item.wcag, severity: item.severity },
-          btn.dataset.pageUrl
-        );
+        const issueId  = btn.dataset.issueId;
+        const isGlobal = btn.dataset.isGlobal === '1';
+        const siteUrl  = currentSession?.url;
+        if (!siteUrl || !issueId) return;
+
+        if (isGlobal) {
+          ignoredIssues.delete(`*::${issueId}`);
+          fetch('/api/ignored-issues/all-pages', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ siteUrl, issueId }),
+          }).catch(() => {});
+        } else {
+          const pageUrl = btn.dataset.pageUrl;
+          ignoredIssues.delete(`${pageUrl}::${issueId}`);
+          fetch('/api/ignored-issues', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ siteUrl, pageUrl, issueId }),
+          }).catch(() => {});
+        }
+
+        updateIgnoredStat();
+        updateHeaderStats();
+        if (currentSession) renderPagesList(currentSession.pages);
+        const page = currentSession?.pages.find(p => p.url === selectedPageUrl);
+        if (page) renderIssues(page.issues || []);
         openIgnoredModal();
       });
     });
@@ -851,18 +899,31 @@ function updateHeaderStats() {
 }
 
 async function toggleIgnoreIssue(issue, pageUrl) {
-  const key = `${pageUrl}::${issue.id}`;
-  const siteUrl = currentSession?.url;
+  const key       = `${pageUrl}::${issue.id}`;
+  const globalKey = `*::${issue.id}`;
+  const siteUrl   = currentSession?.url;
   if (!siteUrl || !issue.id) return;
 
-  if (ignoredIssues.has(key)) {
-    ignoredIssues.delete(key);
-    fetch('/api/ignored-issues', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteUrl, pageUrl, issueId: issue.id }),
-    }).catch(() => {});
+  if (isIssueIgnored(pageUrl, issue.id)) {
+    // Un-ignore: remove page-specific entry and any site-wide entry.
+    if (ignoredIssues.has(key)) {
+      ignoredIssues.delete(key);
+      fetch('/api/ignored-issues', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl, pageUrl, issueId: issue.id }),
+      }).catch(() => {});
+    }
+    if (ignoredIssues.has(globalKey)) {
+      ignoredIssues.delete(globalKey);
+      fetch('/api/ignored-issues/all-pages', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteUrl, issueId: issue.id }),
+      }).catch(() => {});
+    }
   } else {
+    // Ignore on this page only.
     const item = { siteUrl, pageUrl, issueId: issue.id, issueTitle: issue.title, wcag: issue.wcag, severity: issue.severity };
     ignoredIssues.set(key, item);
     fetch('/api/ignored-issues', {
@@ -876,6 +937,25 @@ async function toggleIgnoreIssue(issue, pageUrl) {
   updateHeaderStats();
   if (currentSession) renderPagesList(currentSession.pages);
   const page = currentSession?.pages.find(p => p.url === pageUrl);
+  if (page) renderIssues(page.issues || []);
+}
+
+async function toggleIgnoreIssueAllPages(issue) {
+  const globalKey = `*::${issue.id}`;
+  const siteUrl   = currentSession?.url;
+  if (!siteUrl || !issue.id) return;
+
+  ignoredIssues.set(globalKey, { siteUrl, pageUrl: '*', issueId: issue.id, issueTitle: issue.title, wcag: issue.wcag, severity: issue.severity });
+  fetch('/api/ignored-issues/all-pages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ siteUrl, issueId: issue.id, issueTitle: issue.title, wcag: issue.wcag, severity: issue.severity }),
+  }).catch(() => {});
+
+  updateIgnoredStat();
+  updateHeaderStats();
+  if (currentSession) renderPagesList(currentSession.pages);
+  const page = currentSession?.pages.find(p => p.url === selectedPageUrl);
   if (page) renderIssues(page.issues || []);
 }
 
@@ -1126,8 +1206,8 @@ function renderIssues(issues) {
   const list = document.getElementById('issues-list');
 
   // Partition into active vs ignored
-  const activeIssues  = issues.filter(i => !ignoredIssues.has(`${selectedPageUrl}::${i.id}`));
-  const ignoredOnPage = issues.filter(i =>  ignoredIssues.has(`${selectedPageUrl}::${i.id}`));
+  const activeIssues  = issues.filter(i => !isIssueIgnored(selectedPageUrl, i.id));
+  const ignoredOnPage = issues.filter(i =>  isIssueIgnored(selectedPageUrl, i.id));
 
   let filtered;
   if (currentFilter === 'ignored') {
@@ -1156,7 +1236,9 @@ function renderIssues(issues) {
     return;
   }
 
-  const buildCard = (issue, isIgnored) => `
+  const buildCard = (issue, isIgnored) => {
+    const isGlobal = ignoredIssues.has(`*::${issue.id}`);
+    return `
     <div class="issue-card${isIgnored ? ' issue-card-ignored' : ''}">
       <div class="issue-card-header">
         <span class="sev-tag ${issue.severity}">${escapeHtml(issue.severity)}</span>
@@ -1166,13 +1248,20 @@ function renderIssues(issues) {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
           Fix
         </button>` : ''}
-        <button class="btn-ignore-issue btn-sm${isIgnored ? ' btn-unignore' : ''}" data-issue-id="${escapeHtml(issue.id)}" title="${isIgnored ? 'Remove ignore mark' : 'Mark as visually verified / ignore'}" style="${isIgnored ? 'margin-left:auto' : ''}">
+        ${!isIgnored ? `<button class="btn-ignore-all-pages btn-sm" data-issue-id="${escapeHtml(issue.id)}" title="Ignore this issue on all pages of this site">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          All Pages
+        </button>` : ''}
+        <button class="btn-ignore-issue btn-sm${isIgnored ? ' btn-unignore' : ''}" data-issue-id="${escapeHtml(issue.id)}"
+          title="${isIgnored ? (isGlobal ? 'Remove site-wide ignore mark' : 'Remove ignore mark') : 'Mark as visually verified / ignore on this page'}"
+          style="${isIgnored ? 'margin-left:auto' : ''}">
           ${isIgnored
-            ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Un-ignore`
+            ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>Un-ignore${isGlobal ? ' (all pages)' : ''}`
             : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>Ignore`
           }
         </button>
-      </div>
+      </div>`; };
+  const buildCardBody = (issue) => `
       <div class="issue-card-body">
         ${issue.description ? `<p class="issue-desc">${escapeHtml(issue.description)}</p>` : ''}
         ${issue.elements && issue.elements.length > 0 ? `
@@ -1189,15 +1278,16 @@ function renderIssues(issues) {
         ` : ''}
       </div>
     </div>`;
+  const fullCard = (issue, isIgnored) => buildCard(issue, isIgnored) + buildCardBody(issue);
 
-  let html = filtered.map(issue => buildCard(issue, currentFilter === 'ignored')).join('');
+  let html = filtered.map(issue => fullCard(issue, currentFilter === 'ignored')).join('');
 
   // In "all" view, show ignored issues at the bottom with a separator so users can un-ignore them
   // without needing to know about the "Ignored" filter tab.
   if (currentFilter === 'all' && ignoredOnPage.length > 0) {
     html += `<div class="ignored-inline-divider">
       <span>Ignored / Visually Verified &mdash; ${ignoredOnPage.length} issue${ignoredOnPage.length !== 1 ? 's' : ''}</span>
-    </div>` + ignoredOnPage.map(issue => buildCard(issue, true)).join('');
+    </div>` + ignoredOnPage.map(issue => fullCard(issue, true)).join('');
   }
 
   list.innerHTML = html;
@@ -1213,7 +1303,7 @@ function renderIssues(issues) {
     });
   });
 
-  // Attach Ignore button handlers
+  // Attach Ignore (this page) button handlers
   list.querySelectorAll('.btn-ignore-issue').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1221,6 +1311,17 @@ function renderIssues(issues) {
       const page = currentSession?.pages.find(p => p.url === selectedPageUrl);
       const issue = page?.issues?.find(i => i.id === issueId);
       if (issue && selectedPageUrl) toggleIgnoreIssue(issue, selectedPageUrl);
+    });
+  });
+
+  // Attach Ignore All Pages button handlers
+  list.querySelectorAll('.btn-ignore-all-pages').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const issueId = btn.dataset.issueId;
+      const page = currentSession?.pages.find(p => p.url === selectedPageUrl);
+      const issue = page?.issues?.find(i => i.id === issueId);
+      if (issue) toggleIgnoreIssueAllPages(issue);
     });
   });
 }

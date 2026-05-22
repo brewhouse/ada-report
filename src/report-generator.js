@@ -56,13 +56,19 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+// Check whether a specific issue on a page is ignored — handles both page-specific
+// entries (pageUrl::issueId) and site-wide entries (*::issueId).
+function isIgnored(ignoredSet, pageUrl, issueId) {
+  return ignoredSet.has(`${pageUrl}::${issueId}`) || ignoredSet.has(`*::${issueId}`);
+}
+
 // Proportionally boost a page's score based on how many of its issues are ignored.
 // All issues ignored → 100.  None ignored → original score unchanged.
 function computeAdjustedScore(page, ignoredSet) {
   if (page.score === null || page.score === undefined) return page.score;
   const issues = page.issues || [];
   if (!issues.length) return page.score;
-  const ignored = issues.filter(i => ignoredSet.has(`${page.url}::${i.id}`)).length;
+  const ignored = issues.filter(i => isIgnored(ignoredSet, page.url, i.id)).length;
   if (!ignored) return page.score;
   return Math.min(100, Math.round(page.score + (100 - page.score) * (ignored / issues.length)));
 }
@@ -248,7 +254,7 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
   let ignoredInSession = 0;
   for (const page of completedPages)
     for (const issue of (page.issues || []))
-      if (ignoredSet.has(`${page.url}::${issue.id}`)) ignoredInSession++;
+      if (isIgnored(ignoredSet, page.url, issue.id)) ignoredInSession++;
 
   const adjAvgScore = computeAdjustedSummary(completedPages, ignoredSet).avg ?? summary?.averageScore ?? 0;
 
@@ -257,7 +263,7 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
   for (const page of completedPages) {
     const pageWcagSeen = new Set();
     for (const issue of (page.issues || [])) {
-      if (ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      if (isIgnored(ignoredSet, page.url, issue.id)) continue;
       const key = issue.wcag;
       if (!key || key === 'N/A') continue;
       if (!issuesByWcag[key]) {
@@ -628,7 +634,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
   let ignoredTotal = 0, ignoredCritical = 0, ignoredSerious = 0, ignoredModerate = 0, ignoredMinor = 0;
   for (const page of completedPages) {
     for (const issue of (page.issues || [])) {
-      if (!ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      if (!isIgnored(ignoredSet, page.url, issue.id)) continue;
       ignoredTotal++;
       if      (issue.severity === 'critical') ignoredCritical++;
       else if (issue.severity === 'serious')  ignoredSerious++;
@@ -641,7 +647,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
   const issueFrequency = {};
   for (const page of completedPages) {
     for (const issue of (page.issues || [])) {
-      if (ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      if (isIgnored(ignoredSet, page.url, issue.id)) continue;
       if (!issueFrequency[issue.id]) {
         issueFrequency[issue.id] = { ...issue, pageCount: 0, totalElements: 0 };
       }
@@ -660,7 +666,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
   const avgScore = adjAvg ?? 0;
   const avgColor = scoreColor(avgScore);
   const pagesNoIssues = completedPages.filter(p => {
-    const active = (p.issues || []).filter(i => !ignoredSet.has(`${p.url}::${i.id}`)).length;
+    const active = (p.issues || []).filter(i => !isIgnored(ignoredSet, p.url, i.id)).length;
     return active === 0;
   }).length;
   const pagesBelowScore90 = adjDist.below90;
@@ -833,7 +839,7 @@ export function generateSummaryReport(session, brandKey = null, autoprint = fals
       </thead>
       <tbody>
         ${sortedPages.map(page => {
-          const ai   = (page.issues || []).filter(i => !ignoredSet.has(`${page.url}::${i.id}`));
+          const ai   = (page.issues || []).filter(i => !isIgnored(ignoredSet, page.url, i.id));
           const crit = ai.filter(i => i.severity === 'critical').length;
           const ser  = ai.filter(i => i.severity === 'serious').length;
           const mod  = ai.filter(i => i.severity === 'moderate').length;
@@ -905,7 +911,7 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
   let ignoredTotal = 0, ignoredCritical = 0, ignoredSerious = 0, ignoredModerate = 0, ignoredMinor = 0;
   for (const page of completedPages) {
     for (const issue of (page.issues || [])) {
-      if (!ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      if (!isIgnored(ignoredSet, page.url, issue.id)) continue;
       ignoredTotal++;
       if      (issue.severity === 'critical') ignoredCritical++;
       else if (issue.severity === 'serious')  ignoredSerious++;
@@ -918,7 +924,7 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
   const issueFrequency = {};
   for (const page of completedPages) {
     for (const issue of (page.issues || [])) {
-      if (ignoredSet.has(`${page.url}::${issue.id}`)) continue;
+      if (isIgnored(ignoredSet, page.url, issue.id)) continue;
       if (!issueFrequency[issue.id]) {
         issueFrequency[issue.id] = { ...issue, pageCount: 0, totalElements: 0 };
       }
@@ -938,7 +944,7 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
   const avgColor = scoreColor(avgScore);
 
   const pagesNoIssues = completedPages.filter(p => {
-    const active = (p.issues || []).filter(i => !ignoredSet.has(`${p.url}::${i.id}`)).length;
+    const active = (p.issues || []).filter(i => !isIgnored(ignoredSet, p.url, i.id)).length;
     return active === 0;
   }).length;
   const pagesBelowScore90 = adjDist.below90;
@@ -1094,8 +1100,8 @@ export function generateReport(session, brandKey = null, autoprint = false, igno
     <!-- Page-by-page Results -->
     <h2>Page-by-Page Results</h2>
     ${sortedPages.map(page => {
-      const activeIssues  = (page.issues || []).filter(i => !ignoredSet.has(`${page.url}::${i.id}`));
-      const ignoredOnPage = (page.issues || []).filter(i =>  ignoredSet.has(`${page.url}::${i.id}`));
+      const activeIssues  = (page.issues || []).filter(i => !isIgnored(ignoredSet, page.url, i.id));
+      const ignoredOnPage = (page.issues || []).filter(i =>  isIgnored(ignoredSet, page.url, i.id));
       const hasActive  = activeIssues.length > 0;
       const hasIgnored = ignoredOnPage.length > 0;
       const ps = computeAdjustedScore(page, ignoredSet);

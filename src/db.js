@@ -674,6 +674,23 @@ export async function removeIgnoredIssue({ siteUrl, pageUrl, issueId }) {
   );
 }
 
+// Ignore an issue across all pages of a site (page_url = '*' sentinel).
+export async function saveIgnoredIssueGlobal({ siteUrl, issueId, issueTitle, wcag, severity }) {
+  await pool.execute(
+    `INSERT INTO ignored_issues (site_url, page_url, issue_id, issue_title, wcag, severity)
+     VALUES (?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE ignored_at = CURRENT_TIMESTAMP`,
+    [siteUrl, '*', issueId, (issueTitle || '').substring(0, 1000), wcag || null, severity || null]
+  );
+}
+
+export async function removeIgnoredIssueGlobal({ siteUrl, issueId }) {
+  await pool.execute(
+    'DELETE FROM ignored_issues WHERE site_url = ? AND page_url = ? AND issue_id = ?',
+    [siteUrl, '*', issueId]
+  );
+}
+
 // Returns all ignored issues for a given site URL (base domain match).
 export async function getIgnoredIssuesForSite(siteUrl) {
   const [rows] = await pool.execute(

@@ -20,6 +20,7 @@ import {
   initDb, upsertSession, savePage, deletePageByUrl,
   loadSessionMetas, getFullSession, recomputeSummary, deleteOldSessions,
   saveIgnoredIssue, removeIgnoredIssue, getIgnoredIssuesForSite,
+  saveIgnoredIssueGlobal, removeIgnoredIssueGlobal,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
 
@@ -1143,6 +1144,34 @@ app.delete('/api/ignored-issues', async (req, res) => {
   }
   try {
     await removeIgnoredIssue({ siteUrl, pageUrl, issueId });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ignored-issues/all-pages  — ignore an issue on every page of the site
+app.post('/api/ignored-issues/all-pages', async (req, res) => {
+  const { siteUrl, issueId, issueTitle, wcag, severity } = req.body;
+  if (!siteUrl || !issueId) {
+    return res.status(400).json({ error: 'siteUrl and issueId are required' });
+  }
+  try {
+    await saveIgnoredIssueGlobal({ siteUrl, issueId, issueTitle, wcag, severity });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/ignored-issues/all-pages  — remove a site-wide ignore entry
+app.delete('/api/ignored-issues/all-pages', async (req, res) => {
+  const { siteUrl, issueId } = req.body;
+  if (!siteUrl || !issueId) {
+    return res.status(400).json({ error: 'siteUrl and issueId are required' });
+  }
+  try {
+    await removeIgnoredIssueGlobal({ siteUrl, issueId });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
