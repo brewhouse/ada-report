@@ -691,6 +691,77 @@ export async function removeIgnoredIssueGlobal({ siteUrl, issueId }) {
   );
 }
 
+// Returns score + active/ignored issue counts for one page within a session.
+// Avoids loading the full session — used by the /api/page-summary endpoint.
+export async function getPageSummary(auditId, pageUrl) {
+  const [[sessionRow]] = await pool.execute(
+    'SELECT id, url FROM audit_sessions WHERE id = ?',
+    [auditId]
+  );
+  if (!sessionRow) return null;
+  const siteUrl = sessionRow.url;
+
+  const [[pageRow]] = await pool.execute(
+    'SELECT id, score, audited_at FROM audit_pages WHERE session_id = ? AND url = ? LIMIT 1',
+    [auditId, pageUrl]
+  );
+  if (!pageRow) return { status: 'not_found' };
+
+  const [[raw]] = await pool.execute(
+    `SELECT COUNT(*) AS total,
+            SUM(severity='critical') AS critical,
+            SUM(severity='serious')  AS serious,
+            SUM(severity='moderate') AS moderate,
+            SUM(severity='minor')    AS minor
+     FROM audit_issues WHERE page_id = ? AND session_id = ?`,
+    [pageRow.id, auditId]
+  );
+
+  const [[ign]] = await pool.execute(
+    `SELECT COUNT(*) AS total,
+            SUM(ai.severity='critical') AS critical,
+            SUM(ai.severity='serious')  AS serious,
+            SUM(ai.severity='moderate') AS moderate,
+            SUM(ai.severity='minor')    AS minor
+     FROM audit_issues ai
+     WHERE ai.page_id = ? AND ai.session_id = ?
+       AND EXISTS (
+         SELECT 1 FROM ignored_issues ii
+         WHERE ii.site_url = ? AND ii.issue_id = ai.issue_id
+           AND (ii.page_url = ? OR ii.page_url = '*')
+       )`,
+    [pageRow.id, auditId, siteUrl, pageUrl]
+  );
+
+  return {
+    status:    'found',
+    pageUrl,
+    score:     pageRow.score,
+    auditedAt: pageRow.audited_at ? new Date(pageRow.audited_at).toISOString() : null,
+    issues: {
+      total:    Math.max(0, Number(raw.total)    - Number(ign.total    || 0)),
+      critical: Math.max(0, Number(raw.critical) - Number(ign.critical || 0)),
+      serious:  Math.max(0, Number(raw.serious)  - Number(ign.serious  || 0)),
+      moderate: Math.max(0, Number(raw.moderate) - Number(ign.moderate || 0)),
+      minor:    Math.max(0, Number(raw.minor)    - Number(ign.minor    || 0)),
+    },
+    ignored: Number(ign.total || 0),
+  };
+}
+
+// Returns the latest completed session for a given URL (tries exact, with slash, without slash).
+export async function getLatestCompletedSessionByUrl(url) {
+  const noSlash   = url.replace(/\/+$/, '');
+  const withSlash = noSlash + '/';
+  const [rows] = await pool.execute(
+    `SELECT * FROM audit_sessions
+     WHERE (url = ? OR url = ?) AND status = 'completed'
+     ORDER BY start_time DESC LIMIT 1`,
+    [noSlash, withSlash]
+  );
+  return rows.length ? rowToSession(rows[0]) : null;
+}
+
 // Returns all ignored issues for a given site URL (base domain match).
 export async function getIgnoredIssuesForSite(siteUrl) {
   const [rows] = await pool.execute(

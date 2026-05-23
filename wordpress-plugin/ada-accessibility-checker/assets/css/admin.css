@@ -1,0 +1,219 @@
+/* ── ADA Checker – shared admin styles ─────────────────────────────────────── */
+
+/* Spinner */
+.ada-spinner-inline {
+	display: inline-block;
+	width: 14px; height: 14px;
+	border: 2px solid #e5e7eb;
+	border-top-color: #2563eb;
+	border-radius: 50%;
+	animation: ada-spin .7s linear infinite;
+	vertical-align: middle;
+	margin-right: 6px;
+}
+@keyframes ada-spin { to { transform: rotate(360deg); } }
+
+/* Severity dots */
+.ada-dot {
+	display: inline-block;
+	width: 8px; height: 8px;
+	border-radius: 50%;
+	margin-right: 4px;
+	vertical-align: middle;
+}
+.ada-dot-critical { background: #dc2626; }
+.ada-dot-serious  { background: #ea580c; }
+.ada-dot-moderate { background: #d97706; }
+.ada-dot-minor    { background: #2563eb; }
+.ada-dot-ignored  { background: #9ca3af; }
+
+/* ── Dashboard Widget ──────────────────────────────────────────────────────── */
+
+#ada-widget-wrap {
+	font-size: 13px;
+	line-height: 1.5;
+}
+.ada-state { margin: 0; }
+
+/* Results grid: gauge left, stats right */
+.ada-results-grid {
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
+	margin-bottom: 14px;
+}
+.ada-gauge-col {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	flex-shrink: 0;
+}
+.ada-gauge-label {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .5px;
+	color: #6b7280;
+	margin-top: 4px;
+	text-align: center;
+}
+.ada-stats-col {
+	flex: 1;
+	min-width: 0;
+}
+
+/* Stat row: pages | issues */
+.ada-stat-row {
+	display: flex;
+	align-items: stretch;
+	gap: 0;
+	margin-bottom: 10px;
+}
+.ada-stat-box {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+.ada-stat-num {
+	font-size: 20px;
+	font-weight: 700;
+	color: #111827;
+	line-height: 1.1;
+}
+.ada-stat-lbl {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: .5px;
+	color: #6b7280;
+}
+.ada-stat-divider {
+	width: 1px;
+	background: #e5e7eb;
+	margin: 0 10px;
+}
+
+/* Severity list */
+.ada-severity-list {
+	font-size: 12px;
+	color: #374151;
+	line-height: 2;
+}
+.ada-ignored-row {
+	font-size: 12px;
+	color: #6b7280;
+}
+.ada-last-scan {
+	font-size: 11px;
+	color: #9ca3af;
+	margin-top: 4px;
+}
+
+/* Action buttons row */
+.ada-widget-actions {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	border-top: 1px solid #f3f4f6;
+	padding-top: 12px;
+	margin-top: 4px;
+}
+.ada-scan-btn {
+	flex: 1;
+}
+
+/* Progress bar */
+.ada-progress-track {
+	height: 6px;
+	background: #e5e7eb;
+	border-radius: 3px;
+	margin: 10px 0;
+	overflow: hidden;
+}
+.ada-progress-fill {
+	height: 100%;
+	background: #2563eb;
+	border-radius: 3px;
+	transition: width .4s ease;
+}
+.ada-scan-header {
+	font-size: 13px;
+	color: #374151;
+	margin-bottom: 4px;
+}
+
+/* ── Full Results Page ─────────────────────────────────────────────────────── */
+
+.ada-results-wrap .ada-site-tag {
+	color: #6b7280;
+	margin-top: -6px;
+	margin-bottom: 16px;
+}
+.ada-iframe-toolbar {
+	margin-bottom: 12px;
+	display: flex;
+	align-items: center;
+}
+.ada-iframe-wrap {
+	width: 100%;
+	border: 1px solid #e2e8f0;
+	border-radius: 6px;
+	overflow: hidden;
+}
+.ada-iframe-wrap iframe#ada-results-iframe {
+	width: 100%;
+	height: calc(100vh - 180px);
+	min-height: 600px;
+	border: none;
+	display: block;
+}
+
+/* ── Settings Page ─────────────────────────────────────────────────────────── */
+
+.ada-settings-wrap .ada-section-title {
+	border-bottom: 1px solid #e2e8f0;
+	padding-bottom: 6px;
+	margin-top: 28px;
+	font-size: 15px;
+}
+
+/* ── Meta Box ──────────────────────────────────────────────────────────────── */
+
+#ada-meta-box {
+	font-size: 12px;
+	line-height: 1.6;
+}
+.ada-meta-notice {
+	font-size: 12px;
+	color: #6b7280;
+	margin: 0;
+}
+.ada-meta-state {
+	font-size: 12px;
+}
+.ada-mb-score-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+.ada-mb-score-val {
+	font-size: 22px;
+	font-weight: 700;
+	color: #111827;
+	line-height: 1;
+}
+.ada-mb-table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-bottom: 4px;
+}
+.ada-mb-table td {
+	padding: 2px 4px;
+	font-size: 12px;
+}
+.ada-mb-table td:last-child {
+	text-align: right;
+	font-weight: 600;
+}

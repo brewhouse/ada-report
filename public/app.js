@@ -1687,3 +1687,10 @@ if (_initAuditId) {
 } else {
   initLanding();
 }
+
+// Readonly mode (?readonly=true): hide the "New Audit" button so the embedded
+// view (e.g. WordPress admin iframe) cannot navigate to other audits or start scans.
+if (new URLSearchParams(window.location.search).get('readonly') === 'true') {
+  const _readonlyBtn = document.getElementById('new-audit-btn');
+  if (_readonlyBtn) _readonlyBtn.style.setProperty('display', 'none', 'important');
+}

@@ -21,6 +21,7 @@ import {
   loadSessionMetas, getFullSession, recomputeSummary, deleteOldSessions,
   saveIgnoredIssue, removeIgnoredIssue, getIgnoredIssuesForSite,
   saveIgnoredIssueGlobal, removeIgnoredIssueGlobal,
+  getLatestCompletedSessionByUrl, getPageSummary,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
 
@@ -664,6 +665,116 @@ app.get('/api/audits', (_req, res) => {
       summary:   s.summary,
     }));
   res.json(audits);
+});
+
+// Summary analytics for a URL — returns the latest completed scan's stats,
+// with ignored-issue adjustments applied (matches the dashboard display).
+//
+// Optional ?auditId= parameter: when provided, the in-memory session map is
+// checked first so the response is correct even if the DB write hasn't landed
+// yet (race condition that occurs immediately after a scan completes).
+app.get('/api/scan-summary', async (req, res) => {
+  const { url, auditId } = req.query;
+  if (!url && !auditId) return res.status(400).json({ error: 'url parameter is required' });
+
+  try {
+    let session = null;
+
+    // 1. If auditId supplied, try in-memory first (avoids DB-write race condition).
+    if (auditId) {
+      const mem = auditSessions.get(auditId);
+      if (mem && mem.status === 'completed' && (mem.pages?.length > 0 || mem.summary?.totalPages > 0)) {
+        session = mem;
+      }
+    }
+
+    // 2. Fall back to DB — either by auditId or by URL (latest completed scan).
+    if (!session) {
+      let meta = null;
+      if (auditId) {
+        meta = await getFullSession(auditId);
+        if (meta && meta.status !== 'completed') meta = null;
+      }
+      if (!meta && url) {
+        const urlMeta = await getLatestCompletedSessionByUrl(url);
+        if (urlMeta) meta = await getFullSession(urlMeta.id);
+      }
+      session = meta;
+    }
+
+    if (!session) return res.json({ status: 'not_scanned' });
+
+    // 3. If session came from in-memory (pages populated), skip getFullSession.
+    //    Otherwise getFullSession was already called above and session has pages.
+    const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
+
+    // Build lookup set (matches report-generator logic)
+    const ignoredSet = new Set(ignoredIssuesList.map(i => `${i.pageUrl}::${i.issueId}`));
+    const isIgnored  = (pageUrl, issueId) =>
+      ignoredSet.has(`${pageUrl}::${issueId}`) || ignoredSet.has(`*::${issueId}`);
+
+    let ignoredTotal = 0, ignoredCritical = 0, ignoredSerious = 0,
+        ignoredModerate = 0, ignoredMinor = 0;
+    const adjScores = [];
+
+    for (const page of (session.pages || [])) {
+      if (page.status !== 'completed') continue;
+      const issues  = page.issues || [];
+      const ignored = issues.filter(i => isIgnored(page.url, i.id));
+      ignoredTotal    += ignored.length;
+      ignoredCritical += ignored.filter(i => i.severity === 'critical').length;
+      ignoredSerious  += ignored.filter(i => i.severity === 'serious').length;
+      ignoredModerate += ignored.filter(i => i.severity === 'moderate').length;
+      ignoredMinor    += ignored.filter(i => i.severity === 'minor').length;
+
+      if (page.score !== null && page.score !== undefined) {
+        const ratio = issues.length ? ignored.length / issues.length : 0;
+        adjScores.push(Math.min(100, Math.round(page.score + (100 - page.score) * ratio)));
+      }
+    }
+
+    const adjustedScore = adjScores.length
+      ? Math.round(adjScores.reduce((a, b) => a + b, 0) / adjScores.length)
+      : Math.round(session.summary?.averageScore || 0);
+
+    const s = session.summary || {};
+    res.json({
+      status:       'found',
+      auditId:      session.id,
+      url:          session.url,
+      completedAt:  session.endTime,
+      score:        adjustedScore,
+      pagesAudited: s.totalPages || 0,
+      issues: {
+        total:    Math.max(0, (s.totalIssues    || 0) - ignoredTotal),
+        critical: Math.max(0, (s.criticalIssues || 0) - ignoredCritical),
+        serious:  Math.max(0, (s.seriousIssues  || 0) - ignoredSerious),
+        moderate: Math.max(0, (s.moderateIssues || 0) - ignoredModerate),
+        minor:    Math.max(0, (s.minorIssues    || 0) - ignoredMinor),
+      },
+      ignored: ignoredTotal,
+    });
+  } catch (err) {
+    console.error('[api] GET /api/scan-summary error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Per-page summary — score and issue counts for one page in a completed scan.
+// Efficient: loads only the one page row + its issues, not the entire session.
+app.get('/api/page-summary', async (req, res) => {
+  const { auditId, pageUrl } = req.query;
+  if (!auditId || !pageUrl) {
+    return res.status(400).json({ error: 'auditId and pageUrl parameters are required' });
+  }
+  try {
+    const data = await getPageSummary(auditId, pageUrl);
+    if (!data) return res.status(404).json({ error: 'Audit not found' });
+    res.json(data);
+  } catch (err) {
+    console.error('[api] GET /api/page-summary error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // Full developer report — fetches complete page+issue data from DB.
