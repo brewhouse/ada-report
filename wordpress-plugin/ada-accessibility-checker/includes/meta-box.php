@@ -21,6 +21,17 @@ function ada_render_meta_box( $post ) {
 	$settings  = ada_get_settings();
 	$audit_id  = $settings['last_audit_id'];
 
+	// Auto-discover the latest auditId if not stored yet — same logic as admin-page.php.
+	if ( ! $audit_id ) {
+		$summary = ada_get_scan_summary();
+		if ( ! is_wp_error( $summary ) && ! empty( $summary['auditId'] ) ) {
+			$audit_id = $summary['auditId'];
+			ada_update_setting( 'last_audit_id',  $audit_id );
+			ada_update_setting( 'last_scan_time', $summary['completedAt'] ?? '' );
+			ada_update_setting( 'last_score',     $summary['score']       ?? '' );
+		}
+	}
+
 	// Determine the public URL for this post
 	$page_url  = get_permalink( $post->ID );
 	if ( ! $page_url ) $page_url = '';
