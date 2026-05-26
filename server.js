@@ -22,6 +22,8 @@ import {
   saveIgnoredIssue, removeIgnoredIssue, getIgnoredIssuesForSite,
   saveIgnoredIssueGlobal, removeIgnoredIssueGlobal,
   getLatestCompletedSessionByUrl, getPageSummary,
+  getCampaignClients, upsertCampaignClient, deleteCampaignClient, updateClientScanResults,
+  getCampaignTemplates, upsertCampaignTemplate, deleteCampaignTemplate,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
 
@@ -1393,6 +1395,262 @@ app.post('/api/scheduler/schedules/import', schedulerAuth, async (req, res) => {
 
 app.get('/status', (_req, res) => {
   res.sendFile(join(__dirname, 'public', 'status.html'));
+});
+
+// ── Campaign pages ─────────────────────────────────────────────────────────────
+app.get('/campaign/templates', (_req, res) => {
+  res.sendFile(join(__dirname, 'public', 'campaign-templates.html'));
+});
+
+app.get('/campaign', (_req, res) => {
+  res.sendFile(join(__dirname, 'public', 'campaign.html'));
+});
+
+// Campaign auth — reuse the same credentials / token pool as the scheduler
+app.post('/api/campaign/login', (req, res) => {
+  const { username, password } = req.body;
+  const validUser = process.env.SCHEDULER_USER || 'admin';
+  const validPass = process.env.SCHEDULER_PASS || 'inquiros2025';
+  if (username !== validUser || password !== validPass) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+  const token = uuidv4();
+  schedulerTokens.set(token, Date.now() + TOKEN_TTL_MS);
+  res.json({ token });
+});
+
+// Campaign client CRUD
+app.get('/api/campaign/clients', schedulerAuth, async (_req, res) => {
+  try { res.json(await getCampaignClients()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/campaign/clients', schedulerAuth, async (req, res) => {
+  const { name, url, fromEmail, fromName, ccEmail, notes, recipients } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!url)  return res.status(400).json({ error: 'url is required' });
+  try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+  try {
+    const client = await upsertCampaignClient({
+      id: uuidv4(), name, url, fromEmail, fromName, ccEmail, notes, recipients,
+    });
+    res.status(201).json(client);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/campaign/clients/:id', schedulerAuth, async (req, res) => {
+  const { name, url, fromEmail, fromName, ccEmail, notes, recipients,
+          avgScore, totalIssues, criticalIssues, seriousIssues, moderateIssues, minorIssues, lastAuditId } = req.body;
+  if (url) { try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); } }
+  try {
+    const existing = (await getCampaignClients()).find(c => c.id === req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Client not found' });
+    const updated = await upsertCampaignClient({
+      id: req.params.id,
+      name:      name      ?? existing.name,
+      url:       url       ?? existing.url,
+      fromEmail: fromEmail ?? existing.fromEmail,
+      fromName:  fromName  ?? existing.fromName,
+      ccEmail:   ccEmail   ?? existing.ccEmail,
+      notes:     notes     ?? existing.notes,
+      recipients: recipients ?? existing.recipients,
+    });
+    res.json(updated);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/campaign/clients/:id', schedulerAuth, async (req, res) => {
+  try { await deleteCampaignClient(req.params.id); res.json({ success: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Trigger ADA scan (50 pages) for a campaign client
+app.post('/api/campaign/clients/:id/scan', schedulerAuth, async (req, res) => {
+  const clients = await getCampaignClients().catch(() => []);
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  cleanOldSessions();
+  const auditId = uuidv4();
+  const session = {
+    id:              auditId,
+    url:             client.url,
+    urlList:         null,
+    excludeSitemaps: null,
+    maxPages:        50,
+    status:          'queued',
+    startTime:       new Date().toISOString(),
+    endTime:         null,
+    pages:           [],
+    crawledUrls:     [],
+    currentPage:     null,
+    progress:        { crawled: 0, total: 0, audited: 0 },
+    summary:         null,
+    error:           null,
+    wcag22:          false,
+    listForms:       false,
+    listIframes:     false,
+    checkBrokenLinks: false,
+    pagesWithForms:  null,
+    globalFormsExist: false,
+    pagesWithIframes: null,
+    globalIframesExist: false,
+    brokenLinks:     null,
+    queuePosition:   auditQueue.length + 1,
+  };
+  auditSessions.set(auditId, session);
+  upsertSession(session).catch(err => console.warn('[db] campaign scan upsertSession:', err.message));
+  auditQueue.push({ session });
+  processAuditQueue();
+  res.json({ auditId });
+});
+
+// Save scan results back to client record (called by frontend after audit completes)
+app.post('/api/campaign/clients/:id/scan-results', schedulerAuth, async (req, res) => {
+  const { lastAuditId, avgScore, totalIssues, criticalIssues, seriousIssues, moderateIssues, minorIssues } = req.body;
+  try {
+    await updateClientScanResults(req.params.id, { lastAuditId, avgScore, totalIssues, criticalIssues, seriousIssues, moderateIssues, minorIssues });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Send campaign email using a template to all recipients of a client
+app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res) => {
+  const { templateId } = req.body;
+  if (!templateId) return res.status(400).json({ error: 'templateId is required' });
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    return res.status(503).json({ error: 'Email is not configured on this server.' });
+  }
+
+  const clients = await getCampaignClients().catch(() => []);
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  if (!client.recipients || client.recipients.length === 0) {
+    return res.status(400).json({ error: 'No recipients configured for this client' });
+  }
+
+  const templates = await getCampaignTemplates().catch(() => []);
+  const tmpl = templates.find(t => t.id === templateId);
+  if (!tmpl) return res.status(404).json({ error: 'Template not found' });
+
+  const transporter = nodemailer.createTransport({
+    host:   process.env.SMTP_HOST,
+    port:   parseInt(process.env.SMTP_PORT || '587'),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  });
+
+  function renderTemplate(str, vars) {
+    return str.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
+  }
+
+  const baseVars = {
+    client_name:      client.name,
+    website_url:      client.url,
+    ada_score:        client.avgScore != null ? String(Math.round(client.avgScore)) : 'N/A',
+    total_issues:     String(client.totalIssues ?? 0),
+    critical_issues:  String(client.criticalIssues ?? 0),
+    serious_issues:   String(client.seriousIssues ?? 0),
+    moderate_issues:  String(client.moderateIssues ?? 0),
+    minor_issues:     String(client.minorIssues ?? 0),
+  };
+
+  const errors = [];
+  for (const recipient of client.recipients) {
+    const vars = {
+      ...baseVars,
+      first_name: recipient.firstName || '',
+      last_name:  recipient.lastName  || '',
+    };
+    try {
+      await transporter.sendMail({
+        from:    `"${client.fromName || 'Planeteria Media'}" <${client.fromEmail || 'noreply@planeteria.com'}>`,
+        to:      recipient.email,
+        cc:      client.ccEmail || undefined,
+        subject: renderTemplate(tmpl.subject, vars),
+        html:    renderTemplate(tmpl.body, vars),
+      });
+    } catch (err) {
+      errors.push({ email: recipient.email, error: err.message });
+    }
+  }
+
+  if (errors.length > 0 && errors.length === client.recipients.length) {
+    return res.status(500).json({ error: 'All emails failed', details: errors });
+  }
+  res.json({
+    success: true,
+    sent: client.recipients.length - errors.length,
+    failed: errors.length,
+    details: errors.length ? errors : undefined,
+  });
+});
+
+// Campaign export / import
+app.get('/api/campaign/clients/export', schedulerAuth, async (_req, res) => {
+  try {
+    const data = await getCampaignClients();
+    const date = new Date().toISOString().split('T')[0];
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="campaign-clients-${date}.json"`);
+    res.send(JSON.stringify(data, null, 2));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/campaign/clients/import', schedulerAuth, async (req, res) => {
+  if (!Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'Expected a JSON array of clients' });
+  }
+  let imported = 0, skipped = 0;
+  for (const c of req.body) {
+    if (!c.name || !c.url) { skipped++; continue; }
+    try {
+      await upsertCampaignClient({
+        id: c.id || uuidv4(), name: c.name, url: c.url,
+        fromEmail: c.fromEmail, fromName: c.fromName, ccEmail: c.ccEmail,
+        notes: c.notes, recipients: c.recipients || [],
+      });
+      imported++;
+    } catch { skipped++; }
+  }
+  res.json({ imported, skipped });
+});
+
+// Campaign email templates CRUD
+app.get('/api/campaign/templates', schedulerAuth, async (_req, res) => {
+  try { res.json(await getCampaignTemplates()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/campaign/templates', schedulerAuth, async (req, res) => {
+  const { name, subject, body } = req.body;
+  if (!name)    return res.status(400).json({ error: 'name is required' });
+  if (!subject) return res.status(400).json({ error: 'subject is required' });
+  if (!body)    return res.status(400).json({ error: 'body is required' });
+  try {
+    const tmpl = await upsertCampaignTemplate({ id: uuidv4(), name, subject, body });
+    res.status(201).json(tmpl);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/campaign/templates/:id', schedulerAuth, async (req, res) => {
+  const { name, subject, body } = req.body;
+  try {
+    const existing = (await getCampaignTemplates()).find(t => t.id === req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Template not found' });
+    const updated = await upsertCampaignTemplate({
+      id:      req.params.id,
+      name:    name    ?? existing.name,
+      subject: subject ?? existing.subject,
+      body:    body    ?? existing.body,
+    });
+    res.json(updated);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/campaign/templates/:id', schedulerAuth, async (req, res) => {
+  try { await deleteCampaignTemplate(req.params.id); res.json({ success: true }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('*', (_req, res) => {

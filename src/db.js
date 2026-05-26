@@ -178,6 +178,55 @@ export async function initDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // campaign_clients — one row per campaign client
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS campaign_clients (
+        id              VARCHAR(36)   NOT NULL PRIMARY KEY,
+        name            VARCHAR(500)  NOT NULL,
+        url             VARCHAR(2048) NOT NULL,
+        from_email      VARCHAR(255)  DEFAULT 'noreply@planeteria.com',
+        from_name       VARCHAR(255)  DEFAULT 'Planeteria Media',
+        cc_email        VARCHAR(255)  DEFAULT 'sales@planeteria.com',
+        last_scan_at    DATETIME,
+        last_audit_id   VARCHAR(36),
+        avg_score       DECIMAL(5,2),
+        total_issues    INT           DEFAULT 0,
+        critical_issues INT           DEFAULT 0,
+        serious_issues  INT           DEFAULT 0,
+        moderate_issues INT           DEFAULT 0,
+        minor_issues    INT           DEFAULT 0,
+        notes           TEXT,
+        created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
+        updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_cc_url (url(191))
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // campaign_recipients — repeatable recipients per client
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS campaign_recipients (
+        id          INT           NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        client_id   VARCHAR(36)   NOT NULL,
+        email       VARCHAR(255)  NOT NULL,
+        first_name  VARCHAR(255)  DEFAULT '',
+        last_name   VARCHAR(255)  DEFAULT '',
+        sort_order  INT           DEFAULT 0,
+        INDEX idx_cr_client (client_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // campaign_email_templates — reusable email templates with variable substitution
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS campaign_email_templates (
+        id         VARCHAR(36)  NOT NULL PRIMARY KEY,
+        name       VARCHAR(255) NOT NULL,
+        subject    VARCHAR(500) NOT NULL,
+        body       MEDIUMTEXT   NOT NULL,
+        created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     console.log('[db] All tables initialised');
   } finally {
     conn.release();
@@ -777,6 +826,118 @@ export async function getIgnoredIssuesForSite(siteUrl) {
     severity:   r.severity,
     ignoredAt:  r.ignored_at ? new Date(r.ignored_at).toISOString() : null,
   }));
+}
+
+// ── Campaign: clients ─────────────────────────────────────────────────────────
+
+export async function getCampaignClients() {
+  const [clients] = await pool.execute(
+    'SELECT * FROM campaign_clients ORDER BY created_at DESC'
+  );
+  const [recipients] = await pool.execute(
+    'SELECT * FROM campaign_recipients ORDER BY client_id, sort_order, id'
+  );
+  const recipientsMap = {};
+  for (const r of recipients) {
+    if (!recipientsMap[r.client_id]) recipientsMap[r.client_id] = [];
+    recipientsMap[r.client_id].push({
+      id: r.id, email: r.email,
+      firstName: r.first_name, lastName: r.last_name,
+    });
+  }
+  return clients.map(c => ({
+    id: c.id, name: c.name, url: c.url,
+    fromEmail: c.from_email, fromName: c.from_name, ccEmail: c.cc_email,
+    lastScanAt: c.last_scan_at ? new Date(c.last_scan_at).toISOString() : null,
+    lastAuditId: c.last_audit_id,
+    avgScore: c.avg_score != null ? parseFloat(c.avg_score) : null,
+    totalIssues: c.total_issues, criticalIssues: c.critical_issues,
+    seriousIssues: c.serious_issues, moderateIssues: c.moderate_issues,
+    minorIssues: c.minor_issues, notes: c.notes,
+    createdAt: c.created_at ? new Date(c.created_at).toISOString() : null,
+    updatedAt: c.updated_at ? new Date(c.updated_at).toISOString() : null,
+    recipients: recipientsMap[c.id] || [],
+  }));
+}
+
+export async function upsertCampaignClient(client) {
+  const {
+    id, name, url,
+    fromEmail = 'noreply@planeteria.com',
+    fromName  = 'Planeteria Media',
+    ccEmail   = 'sales@planeteria.com',
+    notes = '',
+    recipients = [],
+  } = client;
+  await pool.execute(
+    `INSERT INTO campaign_clients (id, name, url, from_email, from_name, cc_email, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       name = VALUES(name), url = VALUES(url),
+       from_email = VALUES(from_email), from_name = VALUES(from_name),
+       cc_email = VALUES(cc_email), notes = VALUES(notes)`,
+    [id, name, url, fromEmail, fromName, ccEmail, notes || '']
+  );
+  // Replace recipients
+  await pool.execute('DELETE FROM campaign_recipients WHERE client_id = ?', [id]);
+  for (let i = 0; i < recipients.length; i++) {
+    const r = recipients[i];
+    await pool.execute(
+      `INSERT INTO campaign_recipients (client_id, email, first_name, last_name, sort_order)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, r.email, r.firstName || '', r.lastName || '', i]
+    );
+  }
+  // Return updated client
+  const all = await getCampaignClients();
+  return all.find(c => c.id === id);
+}
+
+export async function deleteCampaignClient(id) {
+  await pool.execute('DELETE FROM campaign_recipients WHERE client_id = ?', [id]);
+  await pool.execute('DELETE FROM campaign_clients WHERE id = ?', [id]);
+}
+
+export async function updateClientScanResults(id, { lastAuditId, avgScore, totalIssues, criticalIssues, seriousIssues, moderateIssues, minorIssues }) {
+  await pool.execute(
+    `UPDATE campaign_clients SET
+       last_scan_at = NOW(), last_audit_id = ?,
+       avg_score = ?, total_issues = ?,
+       critical_issues = ?, serious_issues = ?,
+       moderate_issues = ?, minor_issues = ?
+     WHERE id = ?`,
+    [lastAuditId, avgScore ?? null, totalIssues ?? 0, criticalIssues ?? 0,
+     seriousIssues ?? 0, moderateIssues ?? 0, minorIssues ?? 0, id]
+  );
+}
+
+// ── Campaign: email templates ─────────────────────────────────────────────────
+
+export async function getCampaignTemplates() {
+  const [rows] = await pool.execute(
+    'SELECT * FROM campaign_email_templates ORDER BY created_at DESC'
+  );
+  return rows.map(r => ({
+    id: r.id, name: r.name, subject: r.subject, body: r.body,
+    createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
+    updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+  }));
+}
+
+export async function upsertCampaignTemplate(tmpl) {
+  const { id, name, subject, body } = tmpl;
+  await pool.execute(
+    `INSERT INTO campaign_email_templates (id, name, subject, body)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE name = VALUES(name), subject = VALUES(subject), body = VALUES(body)`,
+    [id, name, subject, body]
+  );
+  const all = await getCampaignTemplates();
+  return all.find(t => t.id === id);
+}
+
+export async function deleteCampaignTemplate(id) {
+  await pool.execute('DELETE FROM campaign_email_templates WHERE id = ?', [id]);
 }
 
 export async function patchScheduleInDb(id, fields) {
