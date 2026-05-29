@@ -219,11 +219,12 @@ function renderTable(clients) {
         </div>
       </div>`;
     } else if (c.pdfScanAt) {
-      const hasStats = c.pdfDiscovered > 0 || c.pdfAudited > 0 || c.pdfPagesCrawled > 0;
+      const hasStats = c.pdfDiscovered > 0 || c.pdfAudited > 0 || c.pdfPagesCrawled > 0 || c.pdfTotalPdfs > 0;
+      const pdfCount = c.pdfDiscovered || c.pdfAudited || c.pdfTotalPdfs || 0;
       pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">
         <div class="pdf-scan-row">
           <span class="pdf-icon">📄</span>
-          <span class="pdf-badge">${c.pdfDiscovered ?? c.pdfTotalPdfs ?? 0} PDFs found</span>
+          <span class="pdf-badge">${pdfCount} PDFs found</span>
           <span style="font-size:11px;color:var(--gray-500)">${fmtDateShort(c.pdfScanAt)}</span>
         </div>
         ${hasStats ? `<div class="pdf-stats-grid">
@@ -235,7 +236,7 @@ function renderTable(clients) {
           <div class="pdf-stat" style="color:#b45309">Errored: <strong>${c.pdfErrored ?? 0}</strong></div>
           ${c.pdfComplianceRate ? `<div class="pdf-stat rate" style="grid-column:1/-1">Compliance rate: <strong>${escHtml(c.pdfComplianceRate)}</strong></div>` : ''}
         </div>` : ''}
-        ${c.pdfReportMarkdown ? `<button class="pdf-report-btn" data-action="view-report" data-id="${escHtml(c.id)}">View Full Report</button>` : ''}
+        ${c.pdfReportMarkdown ? `<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="pdf-report-btn" data-action="view-report" data-id="${escHtml(c.id)}">View Full Report</button><button class="pdf-report-btn" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0" data-action="reparse-pdf" data-id="${escHtml(c.id)}">Re-parse Stats</button></div>` : ''}
       </div>`;
     } else {
       pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">
@@ -295,6 +296,7 @@ function renderTable(clients) {
       if (action === 'delete')      openDeleteModal(id, name);
       if (action === 'send')        sendEmail(id, el);
       if (action === 'view-report') viewPdfReport(id);
+      if (action === 'reparse-pdf') reparsePdf(id, el);
     });
   });
 }
@@ -464,6 +466,25 @@ function viewPdfReport(clientId) {
       openModal('pdf-report-modal');
     })
     .catch(() => showToast('Failed to load report', true));
+}
+
+async function reparsePdf(clientId, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Re-parsing…';
+  try {
+    const res = await fetch(`/api/campaign/clients/${clientId}/reparse-pdf`, {
+      method: 'POST', headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Re-parse failed');
+    showToast('PDF stats re-parsed successfully');
+    await reloadTable();
+  } catch (err) {
+    showToast(`Re-parse failed: ${err.message}`, true);
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
 }
 
 document.getElementById('pdf-report-close').addEventListener('click', () => closeModal('pdf-report-modal'));

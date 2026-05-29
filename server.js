@@ -1561,13 +1561,16 @@ function parsePdfReportStats(markdown) {
   if (!markdown) return {};
 
   // Extract an integer from the report for any of the given label patterns.
-  // Handles: "Label: 42", "| Label | 42 |", "**Label**: 42", "Label — 42"
+  // Handles: "- **Label:** 42", "Label: 42", "| Label | 42 |", "**Label**: 42", "Label — 42"
   function findInt(labels) {
     for (const label of labels) {
       const patterns = [
-        new RegExp(`(?:^|\\n)[\\s>*_]*${label}[\\s*_]*[:\\-–|]+\\s*([\\d,]+)`, 'im'),
-        new RegExp(`\\|\\s*(?:\\*+)?${label}(?:\\*+)?\\s*\\|\\s*([\\d,]+)`, 'im'),
-        new RegExp(`${label}[^\\n]*?([\\d,]+)`, 'im'),
+        // Line-start: "- **Label:** 42" or "Label: 42" or "> Label: 42"
+        new RegExp(`(?:^|\\n)[\\s\\-•>*_]*(?:\\*+|_+)?${label}(?:\\*+|_+)?[\\s]*[:\\-–—|]+\\s*([\\d,]+)`, 'im'),
+        // Table cell: "| Label | 42 |"
+        new RegExp(`\\|\\s*(?:[*_]+)?${label}(?:[*_]+)?\\s*\\|\\s*([\\d,]+)`, 'im'),
+        // Inline: "Label: 42" anywhere on line (last resort)
+        new RegExp(`${label}[^\\n]{0,80}?([\\d,]+)`, 'im'),
       ];
       for (const re of patterns) {
         const m = markdown.match(re);
@@ -1581,9 +1584,9 @@ function parsePdfReportStats(markdown) {
   function findRate(labels) {
     for (const label of labels) {
       const patterns = [
-        new RegExp(`(?:^|\\n)[\\s>*_]*${label}[\\s*_]*[:\\-–|]+\\s*([\\d.]+\\s*%)`, 'im'),
-        new RegExp(`\\|\\s*(?:\\*+)?${label}(?:\\*+)?\\s*\\|\\s*([\\d.]+\\s*%)`, 'im'),
-        new RegExp(`${label}[^\\n]*?([\\d.]+\\s*%)`, 'im'),
+        new RegExp(`(?:^|\\n)[\\s\\-•>*_]*(?:\\*+|_+)?${label}(?:\\*+|_+)?[\\s]*[:\\-–—|]+\\s*([\\d.]+\\s*%)`, 'im'),
+        new RegExp(`\\|\\s*(?:[*_]+)?${label}(?:[*_]+)?\\s*\\|\\s*([\\d.]+\\s*%)`, 'im'),
+        new RegExp(`${label}[^\\n]{0,80}?([\\d.]+\\s*%)`, 'im'),
       ];
       for (const re of patterns) {
         const m = markdown.match(re);
@@ -1593,14 +1596,55 @@ function parsePdfReportStats(markdown) {
     return null;
   }
 
+  const nonCompliant = findInt([
+    'non[\\s\\-]?compliant(?!\\s*(?:rate|pdfs?))',
+    'inaccessible(?:\\s+pdfs?)?',
+    'failed(?:\\s+pdfs?)?(?!\\s+to)',
+    'accessibility\\s+failures?',
+  ]);
+
+  const compliant = findInt([
+    'compliant(?!\\s*(?:rate|pdfs?))(?<!non[\\s\\-]?)',
+    'accessible(?:\\s+pdfs?)?(?!\\s*(?:rate|failures?))',
+    'passed(?:\\s+pdfs?)?',
+  ]);
+
   return {
-    pdfPagesCrawled:  findInt(['pages?\\s+crawled', 'crawled\\s+pages?']),
-    pdfDiscovered:    findInt(['pdfs?\\s+discovered(?:\\s+on\\s+site)?', 'discovered(?:\\s+on\\s+site)?', 'pdfs?\\s+found']),
-    pdfAudited:       findInt(['pdfs?\\s+audited', 'audited\\s+pdfs?']),
-    pdfNonCompliant:  findInt(['non[\\s\\-]?compliant']),
-    pdfCompliant:     findInt(['(?<![Nn]on[\\s\\-]?)compliant(?!\\s*rate)']),
-    pdfErrored:       findInt(['errored?(?:\\s+\\(?could\\s+not\\s+audit\\)?)?', 'failed\\s+to\\s+audit', 'audit\\s+errors?']),
-    pdfComplianceRate: findRate(['compliance\\s+rate', 'compliant\\s+rate']),
+    pdfPagesCrawled: findInt([
+      'pages?\\s+crawled', 'crawled\\s+pages?',
+      'total\\s+pages?', 'pages?\\s+scanned', 'web\\s+pages?',
+      'pages?\\s+visited', 'pages?\\s+checked',
+    ]),
+    pdfDiscovered: findInt([
+      'pdfs?\\s+discovered(?:\\s+on\\s+(?:the\\s+)?site)?',
+      'pdfs?\\s+found(?:\\s+on\\s+(?:the\\s+)?site)?',
+      'discovered(?:\\s+on\\s+(?:the\\s+)?site)?',
+      'total\\s+pdfs?(?!\\s+audited)',
+      'pdfs?\\s+on\\s+(?:the\\s+)?site',
+      'pdfs?\\s+detected',
+      'pdfs?\\s+in\\s+site',
+      'number\\s+of\\s+pdfs?',
+    ]),
+    pdfAudited: findInt([
+      'pdfs?\\s+audited', 'audited\\s+pdfs?',
+      'pdfs?\\s+scanned', 'scanned\\s+pdfs?',
+      'pdfs?\\s+checked', 'checked\\s+pdfs?',
+      'pdfs?\\s+processed', 'pdfs?\\s+tested',
+      'pdfs?\\s+analyzed', 'pdfs?\\s+evaluated',
+    ]),
+    pdfNonCompliant: nonCompliant,
+    pdfCompliant: compliant,
+    pdfErrored: findInt([
+      'errored?(?:\\s+\\(?could\\s+not\\s+audit\\)?)?',
+      'failed\\s+to\\s+audit', 'audit\\s+errors?',
+      'could\\s+not\\s+(?:be\\s+)?audit(?:ed)?',
+      'unreadable(?:\\s+pdfs?)?', 'error(?:ed)?(?:\\s+pdfs?)?',
+    ]),
+    pdfComplianceRate: findRate([
+      'compliance\\s+rate', 'compliant\\s+rate',
+      'accessibility\\s+rate', 'pass\\s+rate',
+      'compliance\\s+percentage', 'compliance\\s+score',
+    ]),
   };
 }
 
@@ -1669,6 +1713,30 @@ app.post('/api/campaign/clients/:id/pdf-scan-results', schedulerAuth, async (req
       pdfErrored:       parsed.pdfErrored       ?? 0,
       pdfComplianceRate: parsed.pdfComplianceRate ?? '',
       pdfReportMarkdown,
+    });
+    res.json({ success: true, parsed });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Re-parse stored PDF markdown report and update stats (no new scan needed)
+app.post('/api/campaign/clients/:id/reparse-pdf', schedulerAuth, async (req, res) => {
+  try {
+    const clients = await getCampaignClients();
+    const client = clients.find(c => c.id === req.params.id);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (!client.pdfReportMarkdown) return res.status(400).json({ error: 'No stored PDF report to re-parse' });
+    const parsed = parsePdfReportStats(client.pdfReportMarkdown);
+    await updateClientPdfResults(req.params.id, {
+      pdfAuditId:       client.pdfAuditId,
+      pdfTotalPdfs:     client.pdfTotalPdfs ?? parsed.pdfAudited ?? 0,
+      pdfPagesCrawled:  parsed.pdfPagesCrawled  ?? 0,
+      pdfDiscovered:    parsed.pdfDiscovered    ?? 0,
+      pdfAudited:       parsed.pdfAudited       ?? 0,
+      pdfCompliant:     parsed.pdfCompliant     ?? 0,
+      pdfNonCompliant:  parsed.pdfNonCompliant  ?? 0,
+      pdfErrored:       parsed.pdfErrored       ?? 0,
+      pdfComplianceRate: parsed.pdfComplianceRate ?? '',
+      pdfReportMarkdown: client.pdfReportMarkdown,
     });
     res.json({ success: true, parsed });
   } catch (err) { res.status(500).json({ error: err.message }); }
