@@ -23,7 +23,7 @@ import {
   saveIgnoredIssueGlobal, removeIgnoredIssueGlobal,
   getLatestCompletedSessionByUrl, getPageSummary,
   getCampaignClients, upsertCampaignClient, deleteCampaignClient,
-  updateClientScanResults, updateClientPdfResults,
+  updateClientScanResults, updateClientPdfResults, updateClientCms,
   getCampaignTemplates, upsertCampaignTemplate, deleteCampaignTemplate,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
@@ -1716,6 +1716,97 @@ app.post('/api/campaign/clients/:id/pdf-scan-results', schedulerAuth, async (req
     });
     res.json({ success: true, parsed });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── CMS detection ─────────────────────────────────────────────────────────────
+
+async function detectCmsForUrl(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+
+  let html = '', headers = {};
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; CMSDetect/1.0)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    headers = Object.fromEntries(res.headers.entries());
+    html = await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const h = html.toLowerCase();
+  const hdr = k => (headers[k] || headers[k.toLowerCase()] || '').toLowerCase();
+
+  // Each rule: [cms_name, test_fn]
+  const rules = [
+    // ── Hosted site-builders ──
+    ['Wix',          () => h.includes('static.wixstatic.com') || h.includes('wix.com/lpvideo')],
+    ['Squarespace',  () => h.includes('squarespace.com') || hdr('server').includes('squarespace')],
+    ['Webflow',      () => h.includes('webflow.com') || hdr('x-powered-by').includes('webflow')],
+    ['Shopify',      () => h.includes('cdn.shopify.com') || hdr('x-shopid') !== ''],
+    ['BigCommerce',  () => h.includes('bigcommerce.com') || h.includes('stencil.bigcommerce')],
+    ['Weebly',       () => h.includes('weebly.com') || h.includes('weeblycloud.com')],
+    ['GoDaddy/Websites+Marketing', () => h.includes('godaddy.com/websites') || h.includes('ols.bizcomponents.net')],
+    // ── Open-source CMS ──
+    ['WordPress',    () => h.includes('wp-content/') || h.includes('wp-includes/') || /generator.*wordpress/i.test(html)],
+    ['Drupal',       () => /generator.*drupal/i.test(html) || h.includes('drupal.js') || hdr('x-generator').includes('drupal') || h.includes('sites/default/files')],
+    ['Joomla',       () => /generator.*joomla/i.test(html) || h.includes('/media/jui/') || h.includes('com_content')],
+    ['TYPO3',        () => /generator.*typo3/i.test(html) || h.includes('typo3conf/') || h.includes('typo3/sysext/')],
+    ['Magento',      () => h.includes('mage/cookies') || h.includes('/skin/frontend/') || h.includes('magento')],
+    ['OpenCart',     () => h.includes('catalog/view/theme') && h.includes('opencart')],
+    ['PrestaShop',   () => h.includes('prestashop') || h.includes('/modules/blockcart/')],
+    ['Ghost',        () => /generator.*ghost/i.test(html) || h.includes('ghost.io') || h.includes('content/themes/casper')],
+    ['Craft CMS',    () => /generator.*craft/i.test(html) || h.includes('craftcms') || hdr('x-powered-by').includes('craft')],
+    ['Concrete CMS', () => h.includes('concrete/js') || h.includes('/application/themes/') && h.includes('concrete')],
+    ['ModX',         () => h.includes('assets/components/') || h.includes('/connectors/modx') || h.includes('modx.com')],
+    // ── Enterprise / Government CMS ──
+    ['Kentico',      () => /generator.*kentico/i.test(html) || h.includes('/cmspages/') || h.includes('kentico') || hdr('x-aspnet-version') !== '' && h.includes('kentico')],
+    ['Sitecore',     () => h.includes('/-/media/') || h.includes('/sitecore/shell/') || h.includes('sitecore-jss') || h.includes('/~/media/')],
+    ['Adobe AEM',    () => h.includes('/etc.clientlibs/') || h.includes('/content/dam/') || h.includes('adobeaemcloud.com')],
+    ['Episerver/Optimizely', () => h.includes('episerver') || h.includes('optimizely.com/cms') || h.includes('epi-cms')],
+    ['Sitefinity',   () => h.includes('telerik.sitefinity') || h.includes('sitefinity') || hdr('x-aspnet-version') !== '' && h.includes('sitefinity')],
+    ['SharePoint',   () => h.includes('sharepoint') || hdr('microsoftsharepointteamservices') !== '' || h.includes('/_layouts/')],
+    ['OpenText Web Solutions', () => h.includes('opentext') || h.includes('teamsite') || h.includes('livelink')],
+    ['Ektron',       () => h.includes('ektron') || h.includes('/workarea/') && h.includes('ektron')],
+    ['DotNetNuke',   () => h.includes('dotnetnuke') || h.includes('/portals/') || hdr('x-dnn-version') !== ''],
+    ['Umbraco',      () => h.includes('umbraco') || hdr('x-umbraco-version') !== ''],
+    ['Contentful',   () => h.includes('ctfassets.net') || hdr('x-powered-by').includes('contentful')],
+    ['Contentstack', () => h.includes('contentstack') && (h.includes('cdn.contentstack') || h.includes('contentstack.io'))],
+    ['Liferay',      () => h.includes('liferay') || hdr('x-liferay-portal') !== ''],
+    ['HubSpot',      () => h.includes('hs-scripts.com') || h.includes('hubspot.com') || h.includes('_hsp')],
+    ['Salesforce',   () => h.includes('force.com') || h.includes('salesforce.com/content') || h.includes('sfdcstatic.com')],
+    // ── Misc ──
+    ['Next.js',      () => hdr('x-powered-by').includes('next.js') || h.includes('__next') || h.includes('_next/static')],
+    ['Gatsby',       () => h.includes('gatsby-') || h.includes('/gatsby-browser')],
+    ['Nuxt.js',      () => h.includes('__nuxt') || h.includes('_nuxt/') || hdr('x-powered-by').includes('nuxt')],
+    ['Angular',      () => h.includes('ng-version=') || h.includes('angular.min.js')],
+    ['React (SPA)',  () => h.includes('react-root') || (h.includes('react') && h.includes('__reactfiber'))],
+  ];
+
+  // Return first match
+  for (const [name, test] of rules) {
+    try { if (test()) return name; } catch { /* skip */ }
+  }
+  return 'Unknown';
+}
+
+app.post('/api/campaign/clients/:id/detect-cms', schedulerAuth, async (req, res) => {
+  try {
+    const clients = await getCampaignClients();
+    const client = clients.find(c => c.id === req.params.id);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    const cms = await detectCmsForUrl(client.url);
+    await updateClientCms(req.params.id, cms);
+    res.json({ cms });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Re-parse stored PDF markdown report and update stats (no new scan needed)

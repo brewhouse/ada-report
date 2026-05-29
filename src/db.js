@@ -236,6 +236,16 @@ export async function initDb() {
         await conn.execute(`ALTER TABLE campaign_clients ADD COLUMN ${col} ${def}`);
     }
 
+    // Backfill CMS detection columns added after initial deploy
+    const cmsColDefs = {
+      cms_detected:    "VARCHAR(100) DEFAULT ''",
+      cms_detected_at: 'DATETIME NULL',
+    };
+    for (const [col, def] of Object.entries(cmsColDefs)) {
+      if (!existingCcCols.has(col))
+        await conn.execute(`ALTER TABLE campaign_clients ADD COLUMN ${col} ${def}`);
+    }
+
     // campaign_recipients — repeatable recipients per client
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS campaign_recipients (
@@ -899,6 +909,8 @@ export async function getCampaignClients() {
     pdfErrored:        c.pdf_errored ?? 0,
     pdfComplianceRate: c.pdf_compliance_rate || '',
     pdfReportMarkdown: c.pdf_report_markdown || null,
+    cmsDetected:   c.cms_detected   || '',
+    cmsDetectedAt: c.cms_detected_at ? new Date(c.cms_detected_at).toISOString() : null,
     createdAt: c.created_at ? new Date(c.created_at).toISOString() : null,
     updatedAt: c.updated_at ? new Date(c.updated_at).toISOString() : null,
     recipients: recipientsMap[c.id] || [],
@@ -974,6 +986,13 @@ export async function updateClientPdfResults(id, {
       pdfErrored ?? 0, pdfComplianceRate ?? '', pdfReportMarkdown ?? null,
       id,
     ]
+  );
+}
+
+export async function updateClientCms(id, cms) {
+  await pool.execute(
+    `UPDATE campaign_clients SET cms_detected = ?, cms_detected_at = NOW() WHERE id = ?`,
+    [cms || '', id]
   );
 }
 

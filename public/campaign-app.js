@@ -279,9 +279,14 @@ function renderTable(clients) {
             style="color:#7c3aed;border-color:#ddd6fe;" title="Scan PDFs on this website">
             ${isPdfScanning ? '…PDF' : '📄 PDF'}
           </button>
+          <button class="sch-act-btn" data-action="detect-cms" data-id="${escHtml(c.id)}"
+            style="color:#0369a1;border-color:#bae6fd;" title="Detect CMS platform">
+            🔍 CMS
+          </button>
           <button class="sch-act-btn" data-action="edit" data-id="${escHtml(c.id)}">Edit</button>
           <button class="sch-act-btn danger" data-action="delete" data-id="${escHtml(c.id)}" data-name="${escHtml(c.name)}">Delete</button>
         </div>
+        ${c.cmsDetected ? `<div class="cms-badge" title="Detected ${c.cmsDetectedAt ? new Date(c.cmsDetectedAt).toLocaleDateString() : ''}">${escHtml(c.cmsDetected)}</div>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -297,6 +302,7 @@ function renderTable(clients) {
       if (action === 'send')        sendEmail(id, el);
       if (action === 'view-report') viewPdfReport(id);
       if (action === 'reparse-pdf') reparsePdf(id, el);
+      if (action === 'detect-cms')  detectCms(id, el);
     });
   });
 }
@@ -482,6 +488,25 @@ async function reparsePdf(clientId, btn) {
     await reloadTable();
   } catch (err) {
     showToast(`Re-parse failed: ${err.message}`, true);
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+async function detectCms(clientId, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '🔍…';
+  try {
+    const res = await fetch(`/api/campaign/clients/${clientId}/detect-cms`, {
+      method: 'POST', headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Detection failed');
+    showToast(`CMS detected: ${data.cms}`);
+    await reloadTable();
+  } catch (err) {
+    showToast(`CMS detection failed: ${err.message}`, true);
     btn.disabled = false;
     btn.textContent = orig;
   }
