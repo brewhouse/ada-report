@@ -133,10 +133,17 @@ function fmtDate(iso) {
     d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // ===================== TABLE RENDER =====================
 
-// Track active scans: clientId → auditId
+// Track active ADA scans: clientId → auditId
 const activeScans = new Map();
+// Track active PDF scans: clientId → pdfAuditId
+const activePdfScans = new Map();
 
 function renderTable(clients) {
   const tbody = document.getElementById('cmp-table-body');
@@ -159,8 +166,9 @@ function renderTable(clients) {
     : '<option value="" disabled>No templates — create one first</option>';
 
   tbody.innerHTML = clients.map(c => {
-    // Recipients cell
     const recipCount = (c.recipients || []).length;
+
+    // Recipients cell
     const recipHtml = recipCount === 0
       ? `<span style="color:var(--gray-400);font-style:italic">No recipients</span>`
       : c.recipients.slice(0, 3).map(r => {
@@ -168,18 +176,18 @@ function renderTable(clients) {
           return `<div class="cmp-recip-item" title="${escHtml(r.email)}">${escHtml(r.email)}${name ? ` <span style="color:var(--gray-400)">(${escHtml(name)})</span>` : ''}</div>`;
         }).join('') + (recipCount > 3 ? `<div class="cmp-recip-more">+${recipCount - 3} more</div>` : '');
 
-    // Scan results cell
+    // ADA scan results
     const isScanning = activeScans.has(c.id);
-    let scanHtml;
+    let adaHtml;
     if (isScanning) {
-      scanHtml = `<div class="cmp-scan-results" id="scan-cell-${escHtml(c.id)}">
+      adaHtml = `<div id="scan-cell-${escHtml(c.id)}">
         <span class="scanning-dot"></span>
-        <span style="font-size:12px;color:var(--gray-500)">Scanning…</span>
+        <span style="font-size:12px;color:var(--gray-500)">ADA scanning…</span>
       </div>`;
     } else if (c.avgScore != null) {
       const score = Math.round(c.avgScore);
       const scoreClass = score >= 80 ? 'high' : score >= 60 ? 'mid' : 'low';
-      scanHtml = `<div class="cmp-scan-results" id="scan-cell-${escHtml(c.id)}">
+      adaHtml = `<div class="cmp-scan-results" id="scan-cell-${escHtml(c.id)}">
         <span class="score-badge ${scoreClass}" title="Average ADA score">${score}</span>
         <div>
           <div class="cmp-issue-pills">
@@ -194,9 +202,37 @@ function renderTable(clients) {
         </div>
       </div>`;
     } else {
-      scanHtml = `<div class="cmp-scan-results" id="scan-cell-${escHtml(c.id)}">
+      adaHtml = `<div class="cmp-scan-results" id="scan-cell-${escHtml(c.id)}">
         <span class="score-badge none">—</span>
-        <span style="font-size:12px;color:var(--gray-400)">Not scanned yet</span>
+        <span style="font-size:12px;color:var(--gray-400)">No ADA scan yet</span>
+      </div>`;
+    }
+
+    // PDF scan results
+    const isPdfScanning = activePdfScans.has(c.id);
+    let pdfHtml;
+    if (isPdfScanning) {
+      pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">
+        <div class="pdf-scan-row">
+          <span class="scanning-dot pdf"></span>
+          <span style="font-size:12px;color:#7c3aed">PDF scanning…</span>
+        </div>
+      </div>`;
+    } else if (c.pdfScanAt) {
+      pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">
+        <div class="pdf-scan-row">
+          <span class="pdf-icon">📄</span>
+          <span class="pdf-badge">${c.pdfTotalPdfs ?? 0} PDFs</span>
+          <span style="font-size:11px;color:var(--gray-500)">${fmtDateShort(c.pdfScanAt)}</span>
+          ${c.pdfReportMarkdown ? `<button class="pdf-report-btn" data-action="view-report" data-id="${escHtml(c.id)}">View Report</button>` : ''}
+        </div>
+      </div>`;
+    } else {
+      pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">
+        <div class="pdf-scan-row">
+          <span class="pdf-icon" style="opacity:.4">📄</span>
+          <span style="font-size:12px;color:var(--gray-400)">No PDF scan yet</span>
+        </div>
       </div>`;
     }
 
@@ -219,12 +255,18 @@ function renderTable(clients) {
         <div class="cmp-client-url"><a href="${escHtml(c.url)}" target="_blank" rel="noopener" style="color:var(--gray-500)">${escHtml(c.url)}</a></div>
       </td>
       <td><div class="cmp-recip-list">${recipHtml}</div></td>
-      <td>${scanHtml}</td>
+      <td>${adaHtml}${pdfHtml}</td>
       <td>${sendHtml}</td>
       <td>
         <div class="cmp-actions">
-          <button class="sch-act-btn scan-btn" data-action="scan" data-id="${escHtml(c.id)}" ${isScanning ? 'disabled' : ''} title="Run ADA scan on 50 pages">
-            ${isScanning ? '…Scanning' : '▶ Scan'}
+          <button class="sch-act-btn scan-btn" data-action="scan" data-id="${escHtml(c.id)}"
+            ${isScanning ? 'disabled' : ''} title="Run ADA accessibility scan on 50 pages">
+            ${isScanning ? '…ADA' : '▶ ADA'}
+          </button>
+          <button class="sch-act-btn" data-action="pdf-scan" data-id="${escHtml(c.id)}"
+            ${isPdfScanning ? 'disabled' : ''}
+            style="color:#7c3aed;border-color:#ddd6fe;" title="Scan PDFs on this website">
+            ${isPdfScanning ? '…PDF' : '📄 PDF'}
           </button>
           <button class="sch-act-btn" data-action="edit" data-id="${escHtml(c.id)}">Edit</button>
           <button class="sch-act-btn danger" data-action="delete" data-id="${escHtml(c.id)}" data-name="${escHtml(c.name)}">Delete</button>
@@ -233,14 +275,16 @@ function renderTable(clients) {
     </tr>`;
   }).join('');
 
-  // Wire up action buttons
+  // Wire up all action buttons
   tbody.querySelectorAll('[data-action]').forEach(el => {
     el.addEventListener('click', () => {
       const { action, id, name } = el.dataset;
-      if (action === 'scan')   startScan(id, el);
-      if (action === 'edit')   openEditModal(id);
-      if (action === 'delete') openDeleteModal(id, name);
-      if (action === 'send')   sendEmail(id, el);
+      if (action === 'scan')        startScan(id, el);
+      if (action === 'pdf-scan')    startPdfScan(id, el);
+      if (action === 'edit')        openEditModal(id);
+      if (action === 'delete')      openDeleteModal(id, name);
+      if (action === 'send')        sendEmail(id, el);
+      if (action === 'view-report') viewPdfReport(id);
     });
   });
 }
@@ -251,23 +295,20 @@ async function reloadTable() {
     if (res.status === 401) { clearToken(); showLogin(); return; }
     allTemplates = await fetchTemplates();
     renderTable(await res.json());
-  } catch (err) {
+  } catch {
     showToast('Failed to reload clients', true);
   }
 }
 
-// ===================== SCAN =====================
+// ===================== ADA SCAN =====================
 
 async function startScan(clientId, btn) {
   btn.disabled = true;
-  btn.textContent = '…Scanning';
+  btn.textContent = '…ADA';
   activeScans.set(clientId, true);
 
-  // Update scan cell immediately
   const scanCell = document.getElementById(`scan-cell-${clientId}`);
-  if (scanCell) {
-    scanCell.innerHTML = `<span class="scanning-dot"></span><span style="font-size:12px;color:var(--gray-500)">Starting scan…</span>`;
-  }
+  if (scanCell) scanCell.innerHTML = `<span class="scanning-dot"></span><span style="font-size:12px;color:var(--gray-500)">Starting scan…</span>`;
 
   try {
     const res = await fetch(`/api/campaign/clients/${clientId}/scan`, {
@@ -280,11 +321,9 @@ async function startScan(clientId, btn) {
   } catch (err) {
     activeScans.delete(clientId);
     btn.disabled = false;
-    btn.textContent = '▶ Scan';
-    showToast(`Scan failed: ${err.message}`, true);
-    if (scanCell) {
-      scanCell.innerHTML = `<span class="score-badge none">—</span><span style="font-size:12px;color:#dc2626">Scan failed</span>`;
-    }
+    btn.textContent = '▶ ADA';
+    showToast(`ADA scan failed: ${err.message}`, true);
+    if (scanCell) scanCell.innerHTML = `<span class="score-badge none">—</span><span style="font-size:12px;color:#dc2626">Scan failed</span>`;
   }
 }
 
@@ -296,46 +335,133 @@ function pollScan(clientId, auditId) {
       const data = await res.json();
 
       const scanCell = document.getElementById(`scan-cell-${clientId}`);
-      if (data.status === 'running' || data.status === 'queued' || data.status === 'crawling' || data.status === 'auditing') {
+      const running = ['running','queued','crawling','auditing'].includes(data.status);
+      if (running) {
         const p = data.progress || {};
         const pct = p.total > 0 ? Math.round(p.audited / p.total * 100) : 0;
-        if (scanCell) {
-          scanCell.innerHTML = `<span class="scanning-dot"></span><span style="font-size:12px;color:var(--gray-500)">${pct > 0 ? pct + '%' : 'Scanning…'} (${p.audited || 0}/${p.total || '?'} pages)</span>`;
-        }
+        if (scanCell) scanCell.innerHTML = `<span class="scanning-dot"></span><span style="font-size:12px;color:var(--gray-500)">${pct > 0 ? pct + '%' : 'Scanning…'} (${p.audited || 0}/${p.total || '?'})</span>`;
         return;
       }
 
-      // Completed or error
       clearInterval(interval);
       activeScans.delete(clientId);
 
       if (data.status === 'completed' && data.summary) {
         const s = data.summary;
-        const results = {
-          lastAuditId:    auditId,
-          avgScore:       s.averageScore ?? 0,
-          totalIssues:    s.totalIssues ?? 0,
-          criticalIssues: s.criticalIssues ?? 0,
-          seriousIssues:  s.seriousIssues ?? 0,
-          moderateIssues: s.moderateIssues ?? 0,
-          minorIssues:    s.minorIssues ?? 0,
-        };
         await fetch(`/api/campaign/clients/${clientId}/scan-results`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify(results),
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({
+            lastAuditId: auditId, avgScore: s.averageScore ?? 0,
+            totalIssues: s.totalIssues ?? 0, criticalIssues: s.criticalIssues ?? 0,
+            seriousIssues: s.seriousIssues ?? 0, moderateIssues: s.moderateIssues ?? 0,
+            minorIssues: s.minorIssues ?? 0,
+          }),
         });
-        showToast('Scan complete — results saved');
+        showToast('ADA scan complete — results saved');
       } else if (data.status === 'error') {
-        showToast(`Scan ended with errors: ${data.error || 'unknown'}`, 'warn');
+        showToast(`ADA scan ended with error: ${data.error || 'unknown'}`, 'warn');
       }
-
       await reloadTable();
-    } catch {
-      // ignore transient errors, keep polling
-    }
+    } catch { /* ignore transient errors */ }
   }, 4000);
 }
+
+// ===================== PDF SCAN =====================
+
+async function startPdfScan(clientId, btn) {
+  btn.disabled = true;
+  btn.textContent = '…PDF';
+  activePdfScans.set(clientId, true);
+
+  const pdfCell = document.getElementById(`pdf-cell-${clientId}`);
+  if (pdfCell) pdfCell.innerHTML = `<div class="pdf-scan-row"><span class="scanning-dot pdf"></span><span style="font-size:12px;color:#7c3aed">Starting PDF scan…</span></div>`;
+
+  try {
+    const res = await fetch(`/api/campaign/clients/${clientId}/pdf-scan`, {
+      method: 'POST', headers: authHeaders(),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `PDF scan failed (${data.code || res.status})`);
+    activePdfScans.set(clientId, data.pdfAuditId);
+    pollPdfScan(clientId, data.pdfAuditId);
+  } catch (err) {
+    activePdfScans.delete(clientId);
+    btn.disabled = false;
+    btn.textContent = '📄 PDF';
+    showToast(`PDF scan failed: ${err.message}`, true);
+    if (pdfCell) pdfCell.innerHTML = `<div class="pdf-scan-row"><span class="pdf-icon" style="opacity:.4">📄</span><span style="font-size:12px;color:#dc2626">Scan failed</span></div>`;
+  }
+}
+
+function pollPdfScan(clientId, pdfAuditId) {
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/campaign/pdf-audit/${pdfAuditId}`, { headers: authHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const pdfCell = document.getElementById(`pdf-cell-${clientId}`);
+      const terminal = data.status === 'completed' || data.status === 'failed';
+
+      if (!terminal) {
+        const msg = data.status === 'running'
+          ? `Scanning… (${data.progress?.scanned ?? 0}/${data.progress?.total ?? '?'} PDFs)`
+          : 'Queued…';
+        if (pdfCell) pdfCell.innerHTML = `<div class="pdf-scan-row"><span class="scanning-dot pdf"></span><span style="font-size:12px;color:#7c3aed">${msg}</span></div>`;
+        return;
+      }
+
+      clearInterval(interval);
+      activePdfScans.delete(clientId);
+
+      if (data.status === 'completed') {
+        // Fetch the markdown report
+        let markdown = null;
+        try {
+          const rptRes = await fetch(`/api/campaign/pdf-audit/${pdfAuditId}/report`, { headers: authHeaders() });
+          if (rptRes.ok) markdown = await rptRes.text();
+        } catch { /* report fetch failed, proceed without it */ }
+
+        const totalPdfs = data.summary?.totalPdfs ?? data.scope?.maxPdfs ?? 0;
+        await fetch(`/api/campaign/clients/${clientId}/pdf-scan-results`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ pdfAuditId, pdfTotalPdfs: totalPdfs, pdfReportMarkdown: markdown }),
+        });
+        showToast(`PDF scan complete — ${totalPdfs} PDFs found`);
+      } else {
+        showToast(`PDF scan failed: ${data.error || data.message || 'unknown error'}`, true);
+      }
+      await reloadTable();
+    } catch { /* ignore transient errors */ }
+  }, 5000);
+}
+
+// ===================== VIEW PDF REPORT =====================
+
+let currentReportClientId = null;
+
+function viewPdfReport(clientId) {
+  currentReportClientId = clientId;
+  // Fetch the client from DOM to get the report we already have stored
+  // We'll re-fetch from API to get the markdown
+  fetch('/api/campaign/clients', { headers: authHeaders() })
+    .then(r => r.json())
+    .then(clients => {
+      const c = clients.find(x => x.id === clientId);
+      if (!c || !c.pdfReportMarkdown) { showToast('No report available', true); return; }
+      document.getElementById('pdf-report-title').textContent = `PDF Report — ${c.name}`;
+      document.getElementById('pdf-report-content').textContent = c.pdfReportMarkdown;
+      openModal('pdf-report-modal');
+    })
+    .catch(() => showToast('Failed to load report', true));
+}
+
+document.getElementById('pdf-report-close').addEventListener('click', () => closeModal('pdf-report-modal'));
+document.getElementById('pdf-report-close-btn').addEventListener('click', () => closeModal('pdf-report-modal'));
+document.getElementById('pdf-report-copy').addEventListener('click', () => {
+  const content = document.getElementById('pdf-report-content').textContent;
+  navigator.clipboard.writeText(content).then(() => showToast('Markdown copied to clipboard'));
+});
 
 // ===================== SEND EMAIL =====================
 
@@ -360,9 +486,7 @@ async function sendEmail(clientId, btn) {
   btn.textContent = 'Sending…';
   try {
     const res = await fetch(`/api/campaign/clients/${clientId}/send-email`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ templateId }),
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ templateId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Send failed');
@@ -399,6 +523,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeModal('cmp-modal');
     closeModal('cmp-delete-modal');
+    closeModal('pdf-report-modal');
   }
 });
 
@@ -463,7 +588,6 @@ async function openEditModal(id) {
     const all = await res.json();
     const c = all.find(x => x.id === id);
     if (!c) return;
-
     editingId = id;
     document.getElementById('cmp-modal-title').textContent = 'Edit Client';
     document.getElementById('f-name').value       = c.name || '';
@@ -474,7 +598,7 @@ async function openEditModal(id) {
     document.getElementById('f-notes').value      = c.notes     || '';
     setRecipients(c.recipients || []);
     openModal('cmp-modal');
-  } catch (err) {
+  } catch {
     showToast('Failed to load client', true);
   }
 }
@@ -487,8 +611,7 @@ document.getElementById('cmp-modal-save').addEventListener('click', async () => 
   try { new URL(url); } catch { showToast('Invalid website URL', true); return; }
 
   const payload = {
-    name,
-    url,
+    name, url,
     fromEmail:  document.getElementById('f-from-email').value.trim() || 'noreply@planeteria.com',
     fromName:   document.getElementById('f-from-name').value.trim()  || 'Planeteria Media',
     ccEmail:    document.getElementById('f-cc-email').value.trim()   || '',

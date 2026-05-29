@@ -181,26 +181,44 @@ export async function initDb() {
     // campaign_clients — one row per campaign client
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS campaign_clients (
-        id              VARCHAR(36)   NOT NULL PRIMARY KEY,
-        name            VARCHAR(500)  NOT NULL,
-        url             VARCHAR(2048) NOT NULL,
-        from_email      VARCHAR(255)  DEFAULT 'noreply@planeteria.com',
-        from_name       VARCHAR(255)  DEFAULT 'Planeteria Media',
-        cc_email        VARCHAR(255)  DEFAULT 'sales@planeteria.com',
-        last_scan_at    DATETIME,
-        last_audit_id   VARCHAR(36),
-        avg_score       DECIMAL(5,2),
-        total_issues    INT           DEFAULT 0,
-        critical_issues INT           DEFAULT 0,
-        serious_issues  INT           DEFAULT 0,
-        moderate_issues INT           DEFAULT 0,
-        minor_issues    INT           DEFAULT 0,
-        notes           TEXT,
-        created_at      DATETIME      DEFAULT CURRENT_TIMESTAMP,
-        updated_at      DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        id                   VARCHAR(36)   NOT NULL PRIMARY KEY,
+        name                 VARCHAR(500)  NOT NULL,
+        url                  VARCHAR(2048) NOT NULL,
+        from_email           VARCHAR(255)  DEFAULT 'noreply@planeteria.com',
+        from_name            VARCHAR(255)  DEFAULT 'Planeteria Media',
+        cc_email             VARCHAR(255)  DEFAULT 'sales@planeteria.com',
+        last_scan_at         DATETIME,
+        last_audit_id        VARCHAR(36),
+        avg_score            DECIMAL(5,2),
+        total_issues         INT           DEFAULT 0,
+        critical_issues      INT           DEFAULT 0,
+        serious_issues       INT           DEFAULT 0,
+        moderate_issues      INT           DEFAULT 0,
+        minor_issues         INT           DEFAULT 0,
+        notes                TEXT,
+        pdf_scan_at          DATETIME,
+        pdf_audit_id         VARCHAR(100),
+        pdf_total_pdfs       INT           DEFAULT 0,
+        pdf_report_markdown  MEDIUMTEXT,
+        created_at           DATETIME      DEFAULT CURRENT_TIMESTAMP,
+        updated_at           DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_cc_url (url(191))
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // Backfill pdf columns added after initial deploy
+    const [ccCols] = await conn.execute(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'campaign_clients'`
+    );
+    const existingCcCols = new Set(ccCols.map(c => c.COLUMN_NAME));
+    if (!existingCcCols.has('pdf_scan_at'))
+      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_scan_at DATETIME NULL');
+    if (!existingCcCols.has('pdf_audit_id'))
+      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_audit_id VARCHAR(100) NULL');
+    if (!existingCcCols.has('pdf_total_pdfs'))
+      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_total_pdfs INT DEFAULT 0');
+    if (!existingCcCols.has('pdf_report_markdown'))
+      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_report_markdown MEDIUMTEXT NULL');
 
     // campaign_recipients — repeatable recipients per client
     await conn.execute(`
@@ -854,6 +872,10 @@ export async function getCampaignClients() {
     totalIssues: c.total_issues, criticalIssues: c.critical_issues,
     seriousIssues: c.serious_issues, moderateIssues: c.moderate_issues,
     minorIssues: c.minor_issues, notes: c.notes,
+    pdfScanAt:         c.pdf_scan_at ? new Date(c.pdf_scan_at).toISOString() : null,
+    pdfAuditId:        c.pdf_audit_id || null,
+    pdfTotalPdfs:      c.pdf_total_pdfs ?? 0,
+    pdfReportMarkdown: c.pdf_report_markdown || null,
     createdAt: c.created_at ? new Date(c.created_at).toISOString() : null,
     updatedAt: c.updated_at ? new Date(c.updated_at).toISOString() : null,
     recipients: recipientsMap[c.id] || [],
@@ -908,6 +930,16 @@ export async function updateClientScanResults(id, { lastAuditId, avgScore, total
      WHERE id = ?`,
     [lastAuditId, avgScore ?? null, totalIssues ?? 0, criticalIssues ?? 0,
      seriousIssues ?? 0, moderateIssues ?? 0, minorIssues ?? 0, id]
+  );
+}
+
+export async function updateClientPdfResults(id, { pdfAuditId, pdfTotalPdfs, pdfReportMarkdown }) {
+  await pool.execute(
+    `UPDATE campaign_clients SET
+       pdf_scan_at = NOW(), pdf_audit_id = ?,
+       pdf_total_pdfs = ?, pdf_report_markdown = ?
+     WHERE id = ?`,
+    [pdfAuditId ?? null, pdfTotalPdfs ?? 0, pdfReportMarkdown ?? null, id]
   );
 }
 

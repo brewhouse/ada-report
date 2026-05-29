@@ -22,7 +22,8 @@ import {
   saveIgnoredIssue, removeIgnoredIssue, getIgnoredIssuesForSite,
   saveIgnoredIssueGlobal, removeIgnoredIssueGlobal,
   getLatestCompletedSessionByUrl, getPageSummary,
-  getCampaignClients, upsertCampaignClient, deleteCampaignClient, updateClientScanResults,
+  getCampaignClients, upsertCampaignClient, deleteCampaignClient,
+  updateClientScanResults, updateClientPdfResults,
   getCampaignTemplates, upsertCampaignTemplate, deleteCampaignTemplate,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
@@ -88,6 +89,47 @@ setInterval(() => {
     if (now > exp) schedulerTokens.delete(tok);
   }
 }, 60 * 60 * 1000);
+
+// ── PDF Checker API token (pdfchecker.inquiros.io) ─────────────────────────────
+const PDF_CHECKER_BASE = 'https://pdfchecker.inquiros.io';
+let pdfCheckerJwt = null;
+let pdfCheckerJwtExpiry = 0;
+
+async function getPdfCheckerToken() {
+  if (pdfCheckerJwt && Date.now() < pdfCheckerJwtExpiry - 60_000) return pdfCheckerJwt;
+  const username = process.env.SCHEDULER_USER || 'admin';
+  const password = process.env.SCHEDULER_PASS || 'inquiros2025';
+  const res = await fetch(`${PDF_CHECKER_BASE}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`PDF checker auth failed (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  pdfCheckerJwt = data.token;
+  pdfCheckerJwtExpiry = Date.now() + 4 * 60 * 60 * 1000;
+  return pdfCheckerJwt;
+}
+
+async function pdfCheckerFetch(path, options = {}) {
+  const token = await getPdfCheckerToken();
+  const res = await fetch(`${PDF_CHECKER_BASE}/api/v1${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+  if (res.status === 401) {
+    pdfCheckerJwt = null; // force re-auth on next call
+    throw new Error('PDF checker session expired — will re-authenticate on retry');
+  }
+  return res;
+}
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', sessions: auditSessions.size }));
@@ -1505,11 +1547,69 @@ app.post('/api/campaign/clients/:id/scan', schedulerAuth, async (req, res) => {
   res.json({ auditId });
 });
 
-// Save scan results back to client record (called by frontend after audit completes)
+// Save ADA scan results back to client record (called by frontend after audit completes)
 app.post('/api/campaign/clients/:id/scan-results', schedulerAuth, async (req, res) => {
   const { lastAuditId, avgScore, totalIssues, criticalIssues, seriousIssues, moderateIssues, minorIssues } = req.body;
   try {
     await updateClientScanResults(req.params.id, { lastAuditId, avgScore, totalIssues, criticalIssues, seriousIssues, moderateIssues, minorIssues });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PDF scan (proxy to pdfchecker.inquiros.io) ────────────────────────────────
+
+// Start a PDF scan for a campaign client
+app.post('/api/campaign/clients/:id/pdf-scan', schedulerAuth, async (req, res) => {
+  const clients = await getCampaignClients().catch(() => []);
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  try {
+    const pdfRes = await pdfCheckerFetch('/audits', {
+      method: 'POST',
+      body: JSON.stringify({ url: client.url, maxPdfs: 50 }),
+    });
+    const data = await pdfRes.json();
+    if (!pdfRes.ok) {
+      return res.status(pdfRes.status).json({ error: data.message || data.error || 'PDF scan start failed', code: data.code });
+    }
+    res.json({ pdfAuditId: data.auditId, status: data.status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Poll PDF scan status (proxied)
+app.get('/api/campaign/pdf-audit/:auditId', schedulerAuth, async (req, res) => {
+  try {
+    const pdfRes = await pdfCheckerFetch(`/audits/${req.params.auditId}`);
+    const data = await pdfRes.json();
+    if (!pdfRes.ok) return res.status(pdfRes.status).json(data);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch PDF scan markdown report (proxied)
+app.get('/api/campaign/pdf-audit/:auditId/report', schedulerAuth, async (req, res) => {
+  try {
+    const pdfRes = await pdfCheckerFetch(`/audits/${req.params.auditId}/report?format=markdown`);
+    if (!pdfRes.ok) {
+      const data = await pdfRes.json().catch(() => ({}));
+      return res.status(pdfRes.status).json(data);
+    }
+    const markdown = await pdfRes.text();
+    res.type('text/markdown').send(markdown);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Save PDF scan results back to client record
+app.post('/api/campaign/clients/:id/pdf-scan-results', schedulerAuth, async (req, res) => {
+  const { pdfAuditId, pdfTotalPdfs, pdfReportMarkdown } = req.body;
+  try {
+    await updateClientPdfResults(req.params.id, { pdfAuditId, pdfTotalPdfs, pdfReportMarkdown });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1545,14 +1645,17 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
   }
 
   const baseVars = {
-    client_name:      client.name,
-    website_url:      client.url,
-    ada_score:        client.avgScore != null ? String(Math.round(client.avgScore)) : 'N/A',
-    total_issues:     String(client.totalIssues ?? 0),
-    critical_issues:  String(client.criticalIssues ?? 0),
-    serious_issues:   String(client.seriousIssues ?? 0),
-    moderate_issues:  String(client.moderateIssues ?? 0),
-    minor_issues:     String(client.minorIssues ?? 0),
+    client_name:         client.name,
+    website_url:         client.url,
+    ada_score:           client.avgScore != null ? String(Math.round(client.avgScore)) : 'N/A',
+    total_issues:        String(client.totalIssues ?? 0),
+    critical_issues:     String(client.criticalIssues ?? 0),
+    serious_issues:      String(client.seriousIssues ?? 0),
+    moderate_issues:     String(client.moderateIssues ?? 0),
+    minor_issues:        String(client.minorIssues ?? 0),
+    pdf_total_pdfs:      String(client.pdfTotalPdfs ?? 0),
+    pdf_scan_date:       client.pdfScanAt ? new Date(client.pdfScanAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+    pdf_report:          client.pdfReportMarkdown || 'No PDF scan results available.',
   };
 
   const errors = [];

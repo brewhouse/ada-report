@@ -136,8 +136,21 @@
     .sch-textarea { width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius); font-size:13px; color:var(--dark); font-family:'Menlo','Consolas',monospace; resize:vertical; line-height:1.5; background:var(--white); }
     .sch-textarea:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); }
 
+    /* PDF scan section */
+    .pdf-scan-section { margin-top:10px; padding-top:10px; border-top:1px dashed var(--border); }
+    .pdf-scan-row { display:flex; align-items:center; gap:8px; }
+    .pdf-icon { font-size:15px; }
+    .pdf-badge { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; padding:2px 8px; border-radius:4px; background:#f0fdf4; color:#166534; }
+    .pdf-report-btn { font-size:11px; padding:2px 8px; border-radius:4px; border:1px solid var(--border); background:var(--white); color:var(--primary); cursor:pointer; transition:all .15s; }
+    .pdf-report-btn:hover { background:var(--primary-light); }
+
+    /* PDF report modal */
+    .report-modal { width:760px; }
+    #pdf-report-content { width:100%; min-height:300px; max-height:60vh; overflow-y:auto; padding:16px; font-family:'Menlo','Consolas',monospace; font-size:12px; line-height:1.7; color:var(--dark); background:var(--gray-100); border:1px solid var(--border); border-radius:var(--radius); white-space:pre-wrap; word-break:break-word; }
+
     /* Scan scanning animation */
     .scanning-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--primary); animation:pulse 1.2s infinite; margin-right:4px; }
+    .scanning-dot.pdf { background:#7c3aed; }
   </style>
 </head>
 <body class="sch-page">
@@ -213,7 +226,7 @@
             <tr>
               <th>Client</th>
               <th>Recipients</th>
-              <th>ADA Scan Results</th>
+              <th>Scan Results</th>
               <th>Send Campaign Email</th>
               <th>Actions</th>
             </tr>
@@ -305,6 +318,25 @@
       <div class="sch-modal-footer">
         <button id="cmp-delete-cancel" class="btn-ghost btn-sm">Cancel</button>
         <button id="cmp-delete-confirm" class="btn-sm" style="background:#dc2626;color:#fff;border:none;padding:7px 16px;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================== PDF REPORT MODAL ======================== -->
+  <div id="pdf-report-modal" class="sch-modal-overlay">
+    <div class="sch-modal report-modal">
+      <div class="sch-modal-header">
+        <h3 id="pdf-report-title">PDF Scan Report</h3>
+        <button class="sch-modal-close" id="pdf-report-close" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="sch-modal-body">
+        <pre id="pdf-report-content"></pre>
+      </div>
+      <div class="sch-modal-footer">
+        <button id="pdf-report-copy" class="sch-act-btn">Copy Markdown</button>
+        <button id="pdf-report-close-btn" class="btn-ghost btn-sm">Close</button>
       </div>
     </div>
   </div>

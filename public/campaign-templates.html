@@ -169,7 +169,11 @@
           <code style="font-size:12px;background:var(--primary-light);color:var(--primary-dark);padding:3px 8px;border-radius:4px;">{{serious_issues}}</code>
           <code style="font-size:12px;background:var(--primary-light);color:var(--primary-dark);padding:3px 8px;border-radius:4px;">{{moderate_issues}}</code>
           <code style="font-size:12px;background:var(--primary-light);color:var(--primary-dark);padding:3px 8px;border-radius:4px;">{{minor_issues}}</code>
+          <code style="font-size:12px;background:#f5f3ff;color:#5b21b6;padding:3px 8px;border-radius:4px;">{{pdf_total_pdfs}}</code>
+          <code style="font-size:12px;background:#f5f3ff;color:#5b21b6;padding:3px 8px;border-radius:4px;">{{pdf_scan_date}}</code>
+          <code style="font-size:12px;background:#f5f3ff;color:#5b21b6;padding:3px 8px;border-radius:4px;">{{pdf_report}}</code>
         </div>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:8px;">Purple variables come from the PDF scan. <code style="background:#f5f3ff;color:#5b21b6;padding:1px 5px;border-radius:3px;">{{pdf_report}}</code> inserts the full markdown report text.</div>
       </div>
 
       <div class="sch-table-wrap">
@@ -234,6 +238,9 @@
             <span class="var-pill" data-var="{{serious_issues}}"  data-target="f-body">{{serious_issues}}</span>
             <span class="var-pill" data-var="{{moderate_issues}}" data-target="f-body">{{moderate_issues}}</span>
             <span class="var-pill" data-var="{{minor_issues}}"    data-target="f-body">{{minor_issues}}</span>
+            <span class="var-pill" data-var="{{pdf_total_pdfs}}"  data-target="f-body" style="border-color:#7c3aed;color:#7c3aed;background:#f5f3ff;">{{pdf_total_pdfs}}</span>
+            <span class="var-pill" data-var="{{pdf_scan_date}}"   data-target="f-body" style="border-color:#7c3aed;color:#7c3aed;background:#f5f3ff;">{{pdf_scan_date}}</span>
+            <span class="var-pill" data-var="{{pdf_report}}"      data-target="f-body" style="border-color:#7c3aed;color:#7c3aed;background:#f5f3ff;">{{pdf_report}}</span>
           </div>
           <div class="body-wrap">
             <textarea id="f-body" placeholder="Write your email body here. HTML is supported.&#10;&#10;Example:&#10;&lt;p&gt;Hi {{first_name}},&lt;/p&gt;&#10;&lt;p&gt;We audited &lt;strong&gt;{{website_url}}&lt;/strong&gt; and found {{total_issues}} accessibility issues with a score of {{ada_score}}/100.&lt;/p&gt;"></textarea>
