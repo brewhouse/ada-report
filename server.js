@@ -97,8 +97,8 @@ let pdfCheckerJwtExpiry = 0;
 
 async function getPdfCheckerToken() {
   if (pdfCheckerJwt && Date.now() < pdfCheckerJwtExpiry - 60_000) return pdfCheckerJwt;
-  const username = process.env.SCHEDULER_USER || 'admin';
-  const password = process.env.SCHEDULER_PASS || 'inquiros2025';
+  const username = process.env.PDF_CHECKER_USER || process.env.SCHEDULER_USER || 'admin';
+  const password = process.env.PDF_CHECKER_PASS || process.env.SCHEDULER_PASS || 'inquiros2025';
   const res = await fetch(`${PDF_CHECKER_BASE}/api/admin/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
