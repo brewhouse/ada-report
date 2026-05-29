@@ -475,6 +475,11 @@ document.getElementById('pdf-report-copy').addEventListener('click', () => {
 
 // ===================== SEND EMAIL =====================
 
+// State for the send-confirm modal
+let pendingSendClientId  = null;
+let pendingSendTemplateId = null;
+let pendingSendBtn       = null;
+
 async function sendEmail(clientId, btn) {
   const row = btn.closest('tr');
   const select = row.querySelector('.cmp-template-select');
@@ -489,14 +494,37 @@ async function sendEmail(clientId, btn) {
   if (recip.length === 0) { showToast('No recipients configured for this client', true); return; }
 
   const tmpl = allTemplates.find(t => t.id === templateId);
-  const confirmed = confirm(`Send "${tmpl?.name || 'email'}" to ${recip.length} recipient(s) for ${client.name}?\n\nSeparate emails will be sent to each recipient.`);
-  if (!confirmed) return;
 
-  btn.disabled = true;
-  btn.textContent = 'Sending…';
+  // Populate and open the send-confirm modal
+  document.getElementById('sm-client-name').textContent   = client.name;
+  document.getElementById('sm-template-name').textContent = tmpl?.name || templateId;
+  document.getElementById('sm-recipients').textContent    =
+    recip.map(r => [r.firstName, r.lastName].filter(Boolean).join(' ')
+      ? `${r.email} (${[r.firstName, r.lastName].filter(Boolean).join(' ')})`
+      : r.email
+    ).join(', ');
+  document.getElementById('sm-cc-email').value = '';
+
+  pendingSendClientId   = clientId;
+  pendingSendTemplateId = templateId;
+  pendingSendBtn        = btn;
+  openModal('cmp-send-modal');
+}
+
+async function executeSend() {
+  const clientId   = pendingSendClientId;
+  const templateId = pendingSendTemplateId;
+  const btn        = pendingSendBtn;
+  const ccEmail    = document.getElementById('sm-cc-email').value.trim();
+
+  closeModal('cmp-send-modal');
+  pendingSendClientId = pendingSendTemplateId = pendingSendBtn = null;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
     const res = await fetch(`/api/campaign/clients/${clientId}/send-email`, {
-      method: 'POST', headers: authHeaders(), body: JSON.stringify({ templateId }),
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ templateId, ccEmail: ccEmail || undefined }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Send failed');
@@ -508,10 +536,18 @@ async function sendEmail(clientId, btn) {
   } catch (err) {
     showToast(`Error: ${err.message}`, true);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Send';
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
   }
 }
+
+document.getElementById('cmp-send-confirm').addEventListener('click', executeSend);
+document.getElementById('cmp-send-close').addEventListener('click',  () => closeModal('cmp-send-modal'));
+document.getElementById('cmp-send-cancel').addEventListener('click', () => closeModal('cmp-send-modal'));
+
+// Allow pressing Enter in the CC field to confirm
+document.getElementById('sm-cc-email').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); executeSend(); }
+});
 
 // ===================== MODAL HELPERS =====================
 
