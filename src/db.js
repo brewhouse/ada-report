@@ -199,6 +199,13 @@ export async function initDb() {
         pdf_scan_at          DATETIME,
         pdf_audit_id         VARCHAR(100),
         pdf_total_pdfs       INT           DEFAULT 0,
+        pdf_pages_crawled    INT           DEFAULT 0,
+        pdf_discovered       INT           DEFAULT 0,
+        pdf_audited          INT           DEFAULT 0,
+        pdf_compliant        INT           DEFAULT 0,
+        pdf_non_compliant    INT           DEFAULT 0,
+        pdf_errored          INT           DEFAULT 0,
+        pdf_compliance_rate  VARCHAR(20)   DEFAULT '',
         pdf_report_markdown  MEDIUMTEXT,
         created_at           DATETIME      DEFAULT CURRENT_TIMESTAMP,
         updated_at           DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -211,14 +218,23 @@ export async function initDb() {
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'campaign_clients'`
     );
     const existingCcCols = new Set(ccCols.map(c => c.COLUMN_NAME));
-    if (!existingCcCols.has('pdf_scan_at'))
-      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_scan_at DATETIME NULL');
-    if (!existingCcCols.has('pdf_audit_id'))
-      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_audit_id VARCHAR(100) NULL');
-    if (!existingCcCols.has('pdf_total_pdfs'))
-      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_total_pdfs INT DEFAULT 0');
-    if (!existingCcCols.has('pdf_report_markdown'))
-      await conn.execute('ALTER TABLE campaign_clients ADD COLUMN pdf_report_markdown MEDIUMTEXT NULL');
+    const pdfColDefs = {
+      pdf_scan_at:         'DATETIME NULL',
+      pdf_audit_id:        'VARCHAR(100) NULL',
+      pdf_total_pdfs:      'INT DEFAULT 0',
+      pdf_pages_crawled:   'INT DEFAULT 0',
+      pdf_discovered:      'INT DEFAULT 0',
+      pdf_audited:         'INT DEFAULT 0',
+      pdf_compliant:       'INT DEFAULT 0',
+      pdf_non_compliant:   'INT DEFAULT 0',
+      pdf_errored:         'INT DEFAULT 0',
+      pdf_compliance_rate: "VARCHAR(20) DEFAULT ''",
+      pdf_report_markdown: 'MEDIUMTEXT NULL',
+    };
+    for (const [col, def] of Object.entries(pdfColDefs)) {
+      if (!existingCcCols.has(col))
+        await conn.execute(`ALTER TABLE campaign_clients ADD COLUMN ${col} ${def}`);
+    }
 
     // campaign_recipients — repeatable recipients per client
     await conn.execute(`
@@ -875,6 +891,13 @@ export async function getCampaignClients() {
     pdfScanAt:         c.pdf_scan_at ? new Date(c.pdf_scan_at).toISOString() : null,
     pdfAuditId:        c.pdf_audit_id || null,
     pdfTotalPdfs:      c.pdf_total_pdfs ?? 0,
+    pdfPagesCrawled:   c.pdf_pages_crawled ?? 0,
+    pdfDiscovered:     c.pdf_discovered ?? 0,
+    pdfAudited:        c.pdf_audited ?? 0,
+    pdfCompliant:      c.pdf_compliant ?? 0,
+    pdfNonCompliant:   c.pdf_non_compliant ?? 0,
+    pdfErrored:        c.pdf_errored ?? 0,
+    pdfComplianceRate: c.pdf_compliance_rate || '',
     pdfReportMarkdown: c.pdf_report_markdown || null,
     createdAt: c.created_at ? new Date(c.created_at).toISOString() : null,
     updatedAt: c.updated_at ? new Date(c.updated_at).toISOString() : null,
@@ -933,13 +956,24 @@ export async function updateClientScanResults(id, { lastAuditId, avgScore, total
   );
 }
 
-export async function updateClientPdfResults(id, { pdfAuditId, pdfTotalPdfs, pdfReportMarkdown }) {
+export async function updateClientPdfResults(id, {
+  pdfAuditId, pdfTotalPdfs, pdfPagesCrawled, pdfDiscovered, pdfAudited,
+  pdfCompliant, pdfNonCompliant, pdfErrored, pdfComplianceRate, pdfReportMarkdown,
+}) {
   await pool.execute(
     `UPDATE campaign_clients SET
        pdf_scan_at = NOW(), pdf_audit_id = ?,
-       pdf_total_pdfs = ?, pdf_report_markdown = ?
+       pdf_total_pdfs = ?, pdf_pages_crawled = ?, pdf_discovered = ?,
+       pdf_audited = ?, pdf_compliant = ?, pdf_non_compliant = ?,
+       pdf_errored = ?, pdf_compliance_rate = ?, pdf_report_markdown = ?
      WHERE id = ?`,
-    [pdfAuditId ?? null, pdfTotalPdfs ?? 0, pdfReportMarkdown ?? null, id]
+    [
+      pdfAuditId ?? null,
+      pdfTotalPdfs ?? 0, pdfPagesCrawled ?? 0, pdfDiscovered ?? 0,
+      pdfAudited ?? 0, pdfCompliant ?? 0, pdfNonCompliant ?? 0,
+      pdfErrored ?? 0, pdfComplianceRate ?? '', pdfReportMarkdown ?? null,
+      id,
+    ]
   );
 }
 

@@ -219,13 +219,23 @@ function renderTable(clients) {
         </div>
       </div>`;
     } else if (c.pdfScanAt) {
+      const hasStats = c.pdfDiscovered > 0 || c.pdfAudited > 0 || c.pdfPagesCrawled > 0;
       pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">
         <div class="pdf-scan-row">
           <span class="pdf-icon">📄</span>
-          <span class="pdf-badge">${c.pdfTotalPdfs ?? 0} PDFs</span>
+          <span class="pdf-badge">${c.pdfDiscovered ?? c.pdfTotalPdfs ?? 0} PDFs found</span>
           <span style="font-size:11px;color:var(--gray-500)">${fmtDateShort(c.pdfScanAt)}</span>
-          ${c.pdfReportMarkdown ? `<button class="pdf-report-btn" data-action="view-report" data-id="${escHtml(c.id)}">View Report</button>` : ''}
         </div>
+        ${hasStats ? `<div class="pdf-stats-grid">
+          <div class="pdf-stat">Pages crawled: <strong>${c.pdfPagesCrawled ?? 0}</strong></div>
+          <div class="pdf-stat">Discovered: <strong>${c.pdfDiscovered ?? 0}</strong></div>
+          <div class="pdf-stat">Audited: <strong>${c.pdfAudited ?? 0}</strong></div>
+          <div class="pdf-stat" style="color:#166534">Compliant: <strong>${c.pdfCompliant ?? 0}</strong></div>
+          <div class="pdf-stat" style="color:#991b1b">Non-compliant: <strong>${c.pdfNonCompliant ?? 0}</strong></div>
+          <div class="pdf-stat" style="color:#b45309">Errored: <strong>${c.pdfErrored ?? 0}</strong></div>
+          ${c.pdfComplianceRate ? `<div class="pdf-stat rate" style="grid-column:1/-1">Compliance rate: <strong>${escHtml(c.pdfComplianceRate)}</strong></div>` : ''}
+        </div>` : ''}
+        ${c.pdfReportMarkdown ? `<button class="pdf-report-btn" data-action="view-report" data-id="${escHtml(c.id)}">View Full Report</button>` : ''}
       </div>`;
     } else {
       pdfHtml = `<div class="pdf-scan-section" id="pdf-cell-${escHtml(c.id)}">

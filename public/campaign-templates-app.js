@@ -172,9 +172,16 @@ const SAMPLE_VARS = {
   serious_issues:  '23',
   moderate_issues: '31',
   minor_issues:    '18',
-  pdf_total_pdfs:  '14',
-  pdf_scan_date:   'May 29, 2026',
-  pdf_report:      '# PDF Accessibility Report\n\n**14 PDFs scanned** on https://acme.gov\n\n## Summary\n- 3 PDFs missing text layer\n- 6 PDFs lack document titles\n- 2 PDFs have no language set\n',
+  pdf_total_pdfs:       '14',
+  pdf_pages_crawled:    '312',
+  pdf_discovered:       '14',
+  pdf_audited:          '14',
+  pdf_compliant:        '8',
+  pdf_non_compliant:    '5',
+  pdf_errored:          '1',
+  pdf_compliance_rate:  '57.1%',
+  pdf_scan_date:        'May 29, 2026',
+  pdf_report:           '# PDF Accessibility Report\n\n**14 PDFs scanned** on https://acme.gov\n\n## Summary\n- 3 PDFs missing text layer\n- 6 PDFs lack document titles\n- 2 PDFs have no language set\n',
 };
 
 function renderTemplate(str, vars) {

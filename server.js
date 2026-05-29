@@ -1556,6 +1556,54 @@ app.post('/api/campaign/clients/:id/scan-results', schedulerAuth, async (req, re
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── PDF report stats parser ───────────────────────────────────────────────────
+function parsePdfReportStats(markdown) {
+  if (!markdown) return {};
+
+  // Extract an integer from the report for any of the given label patterns.
+  // Handles: "Label: 42", "| Label | 42 |", "**Label**: 42", "Label — 42"
+  function findInt(labels) {
+    for (const label of labels) {
+      const patterns = [
+        new RegExp(`(?:^|\\n)[\\s>*_]*${label}[\\s*_]*[:\\-–|]+\\s*([\\d,]+)`, 'im'),
+        new RegExp(`\\|\\s*(?:\\*+)?${label}(?:\\*+)?\\s*\\|\\s*([\\d,]+)`, 'im'),
+        new RegExp(`${label}[^\\n]*?([\\d,]+)`, 'im'),
+      ];
+      for (const re of patterns) {
+        const m = markdown.match(re);
+        if (m) { const n = parseInt(m[1].replace(/,/g, ''), 10); if (!isNaN(n)) return n; }
+      }
+    }
+    return null;
+  }
+
+  // Extract a percentage string (e.g. "75.0%") for the given label patterns.
+  function findRate(labels) {
+    for (const label of labels) {
+      const patterns = [
+        new RegExp(`(?:^|\\n)[\\s>*_]*${label}[\\s*_]*[:\\-–|]+\\s*([\\d.]+\\s*%)`, 'im'),
+        new RegExp(`\\|\\s*(?:\\*+)?${label}(?:\\*+)?\\s*\\|\\s*([\\d.]+\\s*%)`, 'im'),
+        new RegExp(`${label}[^\\n]*?([\\d.]+\\s*%)`, 'im'),
+      ];
+      for (const re of patterns) {
+        const m = markdown.match(re);
+        if (m) return m[1].trim();
+      }
+    }
+    return null;
+  }
+
+  return {
+    pdfPagesCrawled:  findInt(['pages?\\s+crawled', 'crawled\\s+pages?']),
+    pdfDiscovered:    findInt(['pdfs?\\s+discovered(?:\\s+on\\s+site)?', 'discovered(?:\\s+on\\s+site)?', 'pdfs?\\s+found']),
+    pdfAudited:       findInt(['pdfs?\\s+audited', 'audited\\s+pdfs?']),
+    pdfNonCompliant:  findInt(['non[\\s\\-]?compliant']),
+    pdfCompliant:     findInt(['(?<![Nn]on[\\s\\-]?)compliant(?!\\s*rate)']),
+    pdfErrored:       findInt(['errored?(?:\\s+\\(?could\\s+not\\s+audit\\)?)?', 'failed\\s+to\\s+audit', 'audit\\s+errors?']),
+    pdfComplianceRate: findRate(['compliance\\s+rate', 'compliant\\s+rate']),
+  };
+}
+
 // ── PDF scan (proxy to pdfchecker.inquiros.io) ────────────────────────────────
 
 // Start a PDF scan for a campaign client
@@ -1605,12 +1653,24 @@ app.get('/api/campaign/pdf-audit/:auditId/report', schedulerAuth, async (req, re
   }
 });
 
-// Save PDF scan results back to client record
+// Save PDF scan results back to client record (parses stats from markdown automatically)
 app.post('/api/campaign/clients/:id/pdf-scan-results', schedulerAuth, async (req, res) => {
   const { pdfAuditId, pdfTotalPdfs, pdfReportMarkdown } = req.body;
+  const parsed = parsePdfReportStats(pdfReportMarkdown);
   try {
-    await updateClientPdfResults(req.params.id, { pdfAuditId, pdfTotalPdfs, pdfReportMarkdown });
-    res.json({ success: true });
+    await updateClientPdfResults(req.params.id, {
+      pdfAuditId,
+      pdfTotalPdfs: pdfTotalPdfs ?? parsed.pdfAudited ?? 0,
+      pdfPagesCrawled:  parsed.pdfPagesCrawled  ?? 0,
+      pdfDiscovered:    parsed.pdfDiscovered    ?? 0,
+      pdfAudited:       parsed.pdfAudited       ?? 0,
+      pdfCompliant:     parsed.pdfCompliant     ?? 0,
+      pdfNonCompliant:  parsed.pdfNonCompliant  ?? 0,
+      pdfErrored:       parsed.pdfErrored       ?? 0,
+      pdfComplianceRate: parsed.pdfComplianceRate ?? '',
+      pdfReportMarkdown,
+    });
+    res.json({ success: true, parsed });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -1653,9 +1713,16 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
     serious_issues:      String(client.seriousIssues ?? 0),
     moderate_issues:     String(client.moderateIssues ?? 0),
     minor_issues:        String(client.minorIssues ?? 0),
-    pdf_total_pdfs:      String(client.pdfTotalPdfs ?? 0),
-    pdf_scan_date:       client.pdfScanAt ? new Date(client.pdfScanAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
-    pdf_report:          client.pdfReportMarkdown || 'No PDF scan results available.',
+    pdf_total_pdfs:       String(client.pdfTotalPdfs ?? 0),
+    pdf_scan_date:        client.pdfScanAt ? new Date(client.pdfScanAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+    pdf_pages_crawled:    String(client.pdfPagesCrawled ?? 0),
+    pdf_discovered:       String(client.pdfDiscovered ?? 0),
+    pdf_audited:          String(client.pdfAudited ?? 0),
+    pdf_compliant:        String(client.pdfCompliant ?? 0),
+    pdf_non_compliant:    String(client.pdfNonCompliant ?? 0),
+    pdf_errored:          String(client.pdfErrored ?? 0),
+    pdf_compliance_rate:  client.pdfComplianceRate || 'N/A',
+    pdf_report:           client.pdfReportMarkdown || 'No PDF scan results available.',
   };
 
   const errors = [];
