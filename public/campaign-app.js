@@ -524,7 +524,9 @@ async function sendEmail(clientId, btn) {
       ? `${r.email} (${[r.firstName, r.lastName].filter(Boolean).join(' ')})`
       : r.email
     ).join(', ');
-  document.getElementById('sm-cc-email').value = '';
+  document.getElementById('sm-from-name').value  = client.fromName  || 'Planeteria Media';
+  document.getElementById('sm-from-email').value = client.fromEmail || 'noreply@planeteria.com';
+  document.getElementById('sm-cc-email').value   = '';
 
   pendingSendClientId   = clientId;
   pendingSendTemplateId = templateId;
@@ -536,7 +538,9 @@ async function executeSend() {
   const clientId   = pendingSendClientId;
   const templateId = pendingSendTemplateId;
   const btn        = pendingSendBtn;
-  const ccEmail    = document.getElementById('sm-cc-email').value.trim();
+  const fromName  = document.getElementById('sm-from-name').value.trim();
+  const fromEmail = document.getElementById('sm-from-email').value.trim();
+  const ccEmail   = document.getElementById('sm-cc-email').value.trim();
 
   closeModal('cmp-send-modal');
   pendingSendClientId = pendingSendTemplateId = pendingSendBtn = null;
@@ -545,7 +549,12 @@ async function executeSend() {
   try {
     const res = await fetch(`/api/campaign/clients/${clientId}/send-email`, {
       method: 'POST', headers: authHeaders(),
-      body: JSON.stringify({ templateId, ccEmail: ccEmail || undefined }),
+      body: JSON.stringify({
+        templateId,
+        fromName:  fromName  || undefined,
+        fromEmail: fromEmail || undefined,
+        ccEmail:   ccEmail   || undefined,
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Send failed');

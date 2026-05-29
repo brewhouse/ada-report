@@ -1744,7 +1744,7 @@ app.post('/api/campaign/clients/:id/reparse-pdf', schedulerAuth, async (req, res
 
 // Send campaign email using a template to all recipients of a client
 app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res) => {
-  const { templateId, ccEmail } = req.body;
+  const { templateId, ccEmail, fromEmail, fromName } = req.body;
   if (!templateId) return res.status(400).json({ error: 'templateId is required' });
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
     return res.status(503).json({ error: 'Email is not configured on this server.' });
@@ -1802,7 +1802,7 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
     };
     try {
       await transporter.sendMail({
-        from:    `"${client.fromName || 'Planeteria Media'}" <${client.fromEmail || 'noreply@planeteria.com'}>`,
+        from:    `"${fromName || client.fromName || 'Planeteria Media'}" <${fromEmail || client.fromEmail || 'noreply@planeteria.com'}>`,
         to:      recipient.email,
         cc:      ccEmail || undefined,
         subject: renderTemplate(tmpl.subject, vars),
