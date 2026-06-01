@@ -64,13 +64,16 @@ function normalizeUrl(baseUrl, href) {
 
 // ── HTTP client ────────────────────────────────────────────────────────────────
 
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
 const HTTP = axios.create({
   timeout: 45000,
   maxRedirects: 5,
   headers: {
-    'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)',
-    'Accept': 'text/html,application/xhtml+xml,application/xml,*/*',
+    'User-Agent': BROWSER_UA,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
   },
   validateStatus: s => s < 400,
 });
@@ -214,9 +217,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
   async function crawlPage(url) {
     const page = await browser.newPage();
     try {
-      await page.setUserAgent(
-        'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)'
-      );
+      await page.setUserAgent(BROWSER_UA);
 
       // Fast initial load — DOMContentLoaded is enough for PHP/server-rendered pages
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });

@@ -3,7 +3,7 @@ import { crawlWebsite, fetchUrlsFromSitemaps } from './crawler.js';
 import { launchBrowser, closeBrowser, runLighthouseAudit, killAllChrome } from './lighthouse-runner.js';
 import { analyzeConsistency } from './consistency-checker.js';
 
-const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' };
+const CHECK_HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' };
 
 // Errors caused by the page itself — retrying won't help.
 function isNonRetryableError(error) {
@@ -205,7 +205,7 @@ async function _runAudit(session, onUpdate) {
       try {
         const probe = await axios.get(session.url, {
           timeout: 15000, maxRedirects: 5, validateStatus: () => true,
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ADA-Accessibility-Auditor/1.0)' },
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
         });
         reachable = probe.status < 500;
         console.log(`[audit] pre-flight check ${session.url}: HTTP ${probe.status}`);
