@@ -2,6 +2,8 @@
 (function () {
   'use strict';
 
+  let _auditId = '';
+
   function post(action, extra) {
     const body = new URLSearchParams({ action, nonce: adaChecker.nonce, ...extra });
     return fetch(adaChecker.ajaxUrl, {
@@ -87,22 +89,22 @@
     if (lbl) lbl.textContent = 'Rescanning this page… (may take up to 2 minutes)';
 
     // The rescan API is synchronous — the AJAX response only arrives when done.
-    post('ada_rescan_page', { pageUrl }).then(r => {
+    post('ada_rescan_page', { pageUrl, auditId: _auditId }).then(r => {
       if (!r.success) {
         document.getElementById('ada-mb-error-msg').textContent = r.data?.message || 'Rescan failed.';
         show('error');
         return;
       }
       // Rescan finished — reload the updated page results
-      loadPageResults(pageUrl);
+      loadPageResults(pageUrl, _auditId);
     }).catch(() => {
       document.getElementById('ada-mb-error-msg').textContent = 'Request failed or timed out.';
       show('error');
     });
   }
 
-  function loadPageResults(pageUrl) {
-    post('ada_get_page_results', { pageUrl }).then(r => {
+  function loadPageResults(pageUrl, auditId) {
+    post('ada_get_page_results', { pageUrl, auditId }).then(r => {
       if (!r.success) {
         document.getElementById('ada-mb-error-msg').textContent = r.data?.message || 'Failed to load.';
         show('error');
@@ -128,7 +130,10 @@
     const auditId = wrap.dataset.auditId;
     if (!pageUrl || !auditId) return; // handled by PHP (no audit / not published)
 
-    loadPageResults(pageUrl);
+    // Keep module-level reference so rescan can forward it to AJAX handlers.
+    _auditId = auditId;
+
+    loadPageResults(pageUrl, auditId);
 
     const btn = document.getElementById('ada-mb-rescan-btn');
     if (btn) {

@@ -94,6 +94,31 @@ function ada_ajax_ada_get_scan_status() {
 	] );
 }
 
+// ── Shared helper: resolve audit ID from settings, POST param, or auto-discovery ──
+
+function ada_resolve_audit_id() {
+	$settings = ada_get_settings();
+	$audit_id = $settings['last_audit_id'];
+
+	// Accept an audit ID forwarded directly from the meta-box JS.
+	if ( ! $audit_id ) {
+		$audit_id = sanitize_text_field( wp_unslash( $_POST['auditId'] ?? '' ) );
+	}
+
+	// Last resort: auto-discover from the API (same logic as ada_render_meta_box).
+	if ( ! $audit_id ) {
+		$summary = ada_get_scan_summary();
+		if ( ! is_wp_error( $summary ) && ! empty( $summary['auditId'] ) ) {
+			$audit_id = $summary['auditId'];
+			ada_update_setting( 'last_audit_id',  $audit_id );
+			ada_update_setting( 'last_scan_time', $summary['completedAt'] ?? '' );
+			ada_update_setting( 'last_score',     $summary['score']       ?? '' );
+		}
+	}
+
+	return $audit_id;
+}
+
 // ── Per-page results (editor meta box) ───────────────────────────────────────
 
 function ada_ajax_ada_get_page_results() {
@@ -110,8 +135,7 @@ function ada_ajax_ada_get_page_results() {
 		wp_send_json_error( [ 'message' => 'URL does not belong to this site.' ], 403 );
 	}
 
-	$settings = ada_get_settings();
-	$audit_id = $settings['last_audit_id'];
+	$audit_id = ada_resolve_audit_id();
 	if ( ! $audit_id ) {
 		wp_send_json_success( [ 'status' => 'no_audit' ] );
 	}
@@ -134,8 +158,7 @@ function ada_ajax_ada_rescan_page() {
 		wp_send_json_error( [ 'message' => 'pageUrl is required.' ] );
 	}
 
-	$settings = ada_get_settings();
-	$audit_id = $settings['last_audit_id'];
+	$audit_id = ada_resolve_audit_id();
 	if ( ! $audit_id ) {
 		wp_send_json_error( [ 'message' => 'No completed scan found. Please run a full site scan first.' ] );
 	}
