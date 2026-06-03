@@ -15,7 +15,9 @@
     if (body !== undefined) opts.body = JSON.stringify(body);
     const r = await fetch(path, opts);
     if (r.status === 401) { signOut(); return null; }
-    return r.json();
+    const data = await r.json();
+    if (!r.ok) throw new Error(data?.error || `Server error ${r.status}`);
+    return data;
   }
 
   function signOut() {
@@ -105,7 +107,14 @@
     if (filterStatus)  params.set('status',   filterStatus);
     if (filterClient)  params.set('clientId', filterClient);
 
-    const data = await api('GET', '/api/campaign/email-log?' + params.toString());
+    let data;
+    try {
+      data = await api('GET', '/api/campaign/email-log?' + params.toString());
+    } catch (err) {
+      const tbody = document.getElementById('el-tbody');
+      tbody.innerHTML = `<tr><td colspan="10" class="el-empty" style="color:red">Error loading logs: ${escHtml(err.message)}</td></tr>`;
+      return;
+    }
     if (!data) return;
     total    = data.total || 0;
     allItems = data.items || [];
