@@ -46,16 +46,33 @@ async function checkUrlStatus(url) {
       res = await axios[method](url, opts);
     } catch (err) {
       if (method === 'get') return 'ok'; // network error — let Lighthouse try
-      continue; // HEAD failed, try GET
+      continue; // HEAD failed — try GET
     }
 
     const status = res.status;
-    if (status === 404 || status === 410) return 'not-found';
-    if (status === 403) return 'forbidden';
-    if (status === 405 && method === 'head') continue; // HEAD not allowed, try GET
 
-    // Detect content-redirect: the server followed redirects and landed on a
-    // different path (e.g. /old-post → /). Protocol and host changes are fine.
+    // 404/410 are definitive on both HEAD and GET.
+    if (status === 404 || status === 410) return 'not-found';
+
+    if (method === 'head') {
+      // Many servers return 403 or a redirect path for HEAD but serve the page
+      // normally on GET. Never make a definitive call on HEAD alone for these —
+      // always fall through and confirm with a real GET request.
+      if (status === 403 || status === 405) { continue; }
+      const finalUrl = res.request?.res?.responseUrl;
+      if (finalUrl) {
+        try {
+          if (normPath(new URL(finalUrl).pathname) !== origPath) { continue; }
+        } catch {}
+      }
+      return 'ok'; // HEAD returned clean 200 with same path — skip GET
+    }
+
+    // GET response — now we can trust 403 and redirect detection.
+    if (status === 403) return 'forbidden';
+
+    // Detect content-redirect: server landed on a different path (e.g. /old → /).
+    // Protocol/host changes (http→https, www→non-www) are fine.
     const finalUrl = res.request?.res?.responseUrl;
     if (finalUrl) {
       try {

@@ -95,6 +95,13 @@
         show('error');
         return;
       }
+      // If the page itself errored during rescan (e.g. redirect, 403), show the reason.
+      const page = r.data?.page;
+      if (page && page.status === 'error') {
+        document.getElementById('ada-mb-error-msg').textContent = page.error || 'Page could not be audited.';
+        show('error');
+        return;
+      }
       // Rescan finished — reload the updated page results
       loadPageResults(pageUrl, _auditId);
     }).catch(() => {
