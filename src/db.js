@@ -1103,8 +1103,8 @@ export async function getEmailLog({ limit = 50, offset = 0, clientId, status, se
      FROM campaign_email_log
      ${clause}
      ORDER BY sent_at DESC
-     LIMIT ? OFFSET ?`,
-    [...params, parseInt(limit), parseInt(offset)]
+     LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}`,
+    params
   );
 
   const items = rows.map(r => ({
