@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inquiros – Email Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,200;0,8..60,300;0,8..60,400;1,8..60,300&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .sch-page { min-height:100vh; background:var(--gray-100); }
+
+    /* Login */
+    .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 60%,#107DC2 100%); }
+    .login-card { background:var(--white); border-radius:10px; box-shadow:var(--shadow-lg); padding:40px 36px; width:380px; max-width:90vw; }
+    .login-logo { text-align:center; margin-bottom:24px; }
+    .login-logo img { height:32px; }
+    .login-title { font-size:20px; font-weight:700; color:var(--dark); text-align:center; margin-bottom:6px; }
+    .login-sub { font-size:13px; color:var(--gray-500); text-align:center; margin-bottom:28px; }
+    .login-field { margin-bottom:16px; }
+    .login-field label { display:block; font-size:12px; font-weight:600; color:var(--gray-600); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+    .login-field input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius); font-size:14px; color:var(--dark); background:var(--white); }
+    .login-field input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); }
+    .login-btn { width:100%; padding:11px; background:var(--primary); color:var(--white); border:none; border-radius:var(--radius); font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; transition:background .15s; }
+    .login-btn:hover { background:var(--primary-dark); }
+    .login-error { color:#dc2626; font-size:13px; text-align:center; margin-top:12px; min-height:18px; }
+
+    /* Topbar */
+    .sch-topbar { background:var(--white); border-bottom:1px solid var(--border); padding:0 32px; height:56px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10; }
+    .sch-topbar-left { display:flex; align-items:center; gap:16px; }
+    .sch-topbar-logo img { height:26px; display:block; }
+    .sch-topbar-divider { width:1px; height:20px; background:var(--border); }
+    .sch-topbar-title { font-size:14px; font-weight:600; color:var(--charcoal); }
+    .sch-topbar-right { display:flex; align-items:center; gap:12px; }
+    .sch-logout-btn { font-size:13px; color:var(--gray-500); background:none; border:none; cursor:pointer; padding:4px 8px; border-radius:var(--radius); transition:color .15s,background .15s; text-decoration:none; }
+    .sch-logout-btn:hover { color:var(--dark); background:var(--gray-200); }
+    .sch-logout-btn.active { color:var(--primary); font-weight:600; }
+
+    .sch-body { max-width:1600px; margin:0 auto; padding:32px 24px; }
+    .sch-header-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+    .sch-header-row h1 { font-size:22px; font-weight:700; color:var(--dark); }
+    .sch-header-row p { font-size:13px; color:var(--gray-500); margin-top:2px; }
+
+    /* Stats bar */
+    .el-stats { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+    .el-stat-card { background:var(--white); border:1px solid var(--border); border-radius:8px; padding:14px 20px; flex:1; min-width:130px; }
+    .el-stat-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--gray-500); margin-bottom:4px; }
+    .el-stat-value { font-size:22px; font-weight:700; color:var(--dark); }
+    .el-stat-value.delivered { color:#16a34a; }
+    .el-stat-value.opened    { color:#0369a1; }
+    .el-stat-value.clicked   { color:#7c3aed; }
+    .el-stat-value.bounced   { color:#dc2626; }
+
+    /* Filters */
+    .el-filters { background:var(--white); border:1px solid var(--border); border-radius:8px; padding:14px 16px; margin-bottom:16px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .el-filter-input { padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius); font-size:13px; color:var(--dark); background:var(--white); min-width:200px; }
+    .el-filter-input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px var(--primary-light); }
+    .el-filter-select { padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius); font-size:13px; color:var(--dark); background:var(--white); }
+    .el-filter-select:focus { outline:none; border-color:var(--primary); }
+    .el-filter-label { font-size:12px; font-weight:600; color:var(--gray-500); white-space:nowrap; }
+    .el-filter-clear { font-size:12px; color:var(--primary); background:none; border:none; cursor:pointer; padding:4px 8px; border-radius:var(--radius); }
+    .el-filter-clear:hover { background:var(--primary-light); }
+
+    /* Table */
+    .el-table-wrap { background:var(--white); border-radius:8px; border:1px solid var(--border); overflow-x:auto; }
+    .el-table { width:100%; border-collapse:collapse; min-width:1200px; }
+    .el-table th { text-align:left; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--gray-500); padding:11px 14px; background:var(--gray-100); border-bottom:1px solid var(--border); white-space:nowrap; cursor:pointer; user-select:none; }
+    .el-table th:hover { color:var(--dark); }
+    .el-table th.sorted { color:var(--primary); }
+    .el-table td { padding:11px 14px; font-size:13px; color:var(--dark); border-bottom:1px solid var(--border); vertical-align:middle; }
+    .el-table tr:last-child td { border-bottom:none; }
+    .el-table tr:hover td { background:#fafcff; }
+    .el-empty { text-align:center; padding:60px 20px; color:var(--gray-500); font-size:14px; }
+
+    /* Status badge */
+    .el-status { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; white-space:nowrap; }
+    .el-status.sent      { background:#f1f5f9; color:#475569; }
+    .el-status.delivered { background:#dcfce7; color:#166534; }
+    .el-status.opened    { background:#dbeafe; color:#1d4ed8; }
+    .el-status.clicked   { background:#ede9fe; color:#6d28d9; }
+    .el-status.bounce,
+    .el-status.blocked,
+    .el-status.spamreport { background:#fee2e2; color:#991b1b; }
+    .el-status.failed    { background:#fee2e2; color:#991b1b; }
+    .el-status::before { content:''; display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; }
+
+    /* Timestamp cells */
+    .el-ts { font-size:12px; color:var(--gray-500); white-space:nowrap; }
+    .el-ts.has-value { color:var(--dark); }
+
+    /* Subject / recipient */
+    .el-subject { max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+    .el-recipient { font-weight:600; }
+    .el-recipient-name { font-size:11px; color:var(--gray-500); }
+    .el-client-name { font-weight:600; white-space:nowrap; }
+    .el-client-tmpl { font-size:11px; color:var(--gray-500); margin-top:1px; }
+
+    /* Action button */
+    .el-refresh-btn { font-size:11px; padding:3px 8px; border-radius:var(--radius); border:1px solid var(--border); cursor:pointer; background:var(--white); color:var(--gray-600); transition:all .15s; }
+    .el-refresh-btn:hover { background:var(--gray-100); color:var(--dark); }
+    .el-refresh-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+    /* Pagination */
+    .el-pager { display:flex; align-items:center; gap:8px; margin-top:16px; justify-content:center; }
+    .el-page-btn { padding:6px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--white); font-size:13px; cursor:pointer; color:var(--dark); transition:all .15s; }
+    .el-page-btn:hover { background:var(--gray-100); }
+    .el-page-btn.active { background:var(--primary); color:var(--white); border-color:var(--primary); }
+    .el-page-btn:disabled { opacity:.4; cursor:not-allowed; }
+    .el-page-info { font-size:13px; color:var(--gray-500); }
+
+    /* Toast */
+    .sch-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#1e293b; color:var(--white); padding:10px 20px; border-radius:6px; font-size:13.5px; z-index:200; animation:toast-in .2s ease; }
+    .sch-toast.error { background:#dc2626; }
+    .sch-toast.warn  { background:#b45309; }
+    @keyframes toast-in { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
+    /* Sort arrow */
+    .sort-arrow { display:inline-block; margin-left:3px; opacity:.4; }
+    th.sorted .sort-arrow { opacity:1; }
+  </style>
+</head>
+<body class="sch-page">
+
+  <!-- LOGIN -->
+  <div id="el-login" style="display:none">
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-logo">
+          <img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria">
+        </div>
+        <div class="login-title">Email Log</div>
+        <div class="login-sub">Sign in to view sent email history</div>
+        <form id="login-form">
+          <div class="login-field">
+            <label for="login-user">Username</label>
+            <input type="text" id="login-user" autocomplete="username" spellcheck="false">
+          </div>
+          <div class="login-field">
+            <label for="login-pass">Password</label>
+            <input type="password" id="login-pass" autocomplete="current-password">
+          </div>
+          <button type="submit" class="login-btn">Sign In</button>
+          <div id="login-error" class="login-error"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="el-dashboard" style="display:none">
+
+    <div class="sch-topbar">
+      <div class="sch-topbar-left">
+        <div class="sch-topbar-logo">
+          <img src="https://www.planeteria.com/wp-content/uploads/2024/11/logo-1.svg" alt="Planeteria">
+        </div>
+        <div class="sch-topbar-divider"></div>
+        <div class="sch-topbar-title">ADA Campaign Manager</div>
+      </div>
+      <div class="sch-topbar-right">
+        <a href="/campaign/email-log" class="sch-logout-btn active" style="text-decoration:none">Email Log</a>
+        <a href="/campaign/templates" class="sch-logout-btn" style="text-decoration:none">Email Templates</a>
+        <a href="/campaign" class="sch-logout-btn" style="text-decoration:none">Campaign Clients</a>
+        <a href="/scheduler" class="sch-logout-btn" style="text-decoration:none">Scheduler</a>
+        <a href="/" class="sch-logout-btn" style="text-decoration:none">← Auditor</a>
+        <button id="el-logout-btn" class="sch-logout-btn">Sign Out</button>
+      </div>
+    </div>
+
+    <div class="sch-body">
+      <div class="sch-header-row">
+        <div>
+          <h1>Email Log</h1>
+          <p>Track every email sent from the campaign manager — delivery, open, and click status via SendGrid.</p>
+        </div>
+        <button id="el-refresh-all-btn" class="btn-primary btn-sm" style="gap:6px">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Refresh All
+        </button>
+      </div>
+
+      <!-- Stats -->
+      <div class="el-stats">
+        <div class="el-stat-card">
+          <div class="el-stat-label">Total Sent</div>
+          <div class="el-stat-value" id="stat-total">—</div>
+        </div>
+        <div class="el-stat-card">
+          <div class="el-stat-label">Delivered</div>
+          <div class="el-stat-value delivered" id="stat-delivered">—</div>
+        </div>
+        <div class="el-stat-card">
+          <div class="el-stat-label">Opened</div>
+          <div class="el-stat-value opened" id="stat-opened">—</div>
+        </div>
+        <div class="el-stat-card">
+          <div class="el-stat-label">Clicked</div>
+          <div class="el-stat-value clicked" id="stat-clicked">—</div>
+        </div>
+        <div class="el-stat-card">
+          <div class="el-stat-label">Bounced / Spam</div>
+          <div class="el-stat-value bounced" id="stat-bounced">—</div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="el-filters">
+        <span class="el-filter-label">Filter:</span>
+        <input type="search" id="el-search" class="el-filter-input" placeholder="Search recipient, client, subject…" style="flex:1;min-width:200px">
+        <select id="el-status-filter" class="el-filter-select">
+          <option value="">All statuses</option>
+          <option value="sent">Sent</option>
+          <option value="delivered">Delivered</option>
+          <option value="opened">Opened</option>
+          <option value="clicked">Clicked</option>
+          <option value="bounce">Bounced</option>
+          <option value="blocked">Blocked</option>
+          <option value="spamreport">Spam Report</option>
+          <option value="failed">Failed</option>
+        </select>
+        <select id="el-client-filter" class="el-filter-select">
+          <option value="">All clients</option>
+        </select>
+        <button id="el-clear-btn" class="el-filter-clear">Clear</button>
+      </div>
+
+      <!-- Table -->
+      <div class="el-table-wrap">
+        <table class="el-table">
+          <thead>
+            <tr>
+              <th data-sort="sentAt">Sent At <span class="sort-arrow">↕</span></th>
+              <th>Client / Template</th>
+              <th>Recipient</th>
+              <th>From</th>
+              <th data-sort="subject">Subject <span class="sort-arrow">↕</span></th>
+              <th>Status</th>
+              <th data-sort="deliveredAt">Delivered <span class="sort-arrow">↕</span></th>
+              <th data-sort="openedAt">Opened <span class="sort-arrow">↕</span></th>
+              <th data-sort="clickedAt">Clicked <span class="sort-arrow">↕</span></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="el-tbody">
+            <tr><td colspan="10" class="el-empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div id="el-pager" class="el-pager"></div>
+
+    </div><!-- /.sch-body -->
+  </div><!-- /#el-dashboard -->
+
+  <script src="campaign-email-log-app.js"></script>
+</body>
+</html>

@@ -25,6 +25,7 @@ import {
   getCampaignClients, upsertCampaignClient, deleteCampaignClient,
   updateClientScanResults, updateClientPdfResults, updateClientCms,
   getCampaignTemplates, upsertCampaignTemplate, deleteCampaignTemplate,
+  logEmailSent, updateEmailLogBySgId, getEmailLogById, getEmailLog,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
 
@@ -1837,7 +1838,9 @@ app.post('/api/campaign/clients/:id/reparse-pdf', schedulerAuth, async (req, res
 app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res) => {
   const { templateId, ccEmail, fromEmail, fromName } = req.body;
   if (!templateId) return res.status(400).json({ error: 'templateId is required' });
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+
+  const useSendGrid = !!process.env.SENDGRID_API_KEY;
+  if (!useSendGrid && (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS)) {
     return res.status(503).json({ error: 'Email is not configured on this server.' });
   }
 
@@ -1852,12 +1855,8 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
   const tmpl = templates.find(t => t.id === templateId);
   if (!tmpl) return res.status(404).json({ error: 'Template not found' });
 
-  const transporter = nodemailer.createTransport({
-    host:   process.env.SMTP_HOST,
-    port:   parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-  });
+  const effectiveFrom     = fromEmail || client.fromEmail || 'noreply@planeteria.com';
+  const effectiveFromName = fromName  || client.fromName  || 'Planeteria Media';
 
   function renderTemplate(str, vars) {
     return str.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
@@ -1872,47 +1871,182 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
     serious_issues:      String(client.seriousIssues ?? 0),
     moderate_issues:     String(client.moderateIssues ?? 0),
     minor_issues:        String(client.minorIssues ?? 0),
-    pdf_total_pdfs:       String(client.pdfTotalPdfs ?? 0),
-    pdf_scan_date:        client.pdfScanAt ? new Date(client.pdfScanAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
-    pdf_pages_crawled:    String(client.pdfPagesCrawled ?? 0),
-    pdf_discovered:       String(client.pdfDiscovered ?? 0),
-    pdf_audited:          String(client.pdfAudited ?? 0),
-    pdf_compliant:        String(client.pdfCompliant ?? 0),
-    pdf_non_compliant:    String(client.pdfNonCompliant ?? 0),
-    pdf_errored:          String(client.pdfErrored ?? 0),
-    pdf_compliance_rate:  client.pdfComplianceRate || 'N/A',
-    pdf_report:           client.pdfReportMarkdown || 'No PDF scan results available.',
+    pdf_total_pdfs:      String(client.pdfTotalPdfs ?? 0),
+    pdf_scan_date:       client.pdfScanAt ? new Date(client.pdfScanAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A',
+    pdf_pages_crawled:   String(client.pdfPagesCrawled ?? 0),
+    pdf_discovered:      String(client.pdfDiscovered ?? 0),
+    pdf_audited:         String(client.pdfAudited ?? 0),
+    pdf_compliant:       String(client.pdfCompliant ?? 0),
+    pdf_non_compliant:   String(client.pdfNonCompliant ?? 0),
+    pdf_errored:         String(client.pdfErrored ?? 0),
+    pdf_compliance_rate: client.pdfComplianceRate || 'N/A',
+    pdf_report:          client.pdfReportMarkdown || 'No PDF scan results available.',
   };
 
+  let transporter = null;
+  if (!useSendGrid) {
+    transporter = nodemailer.createTransport({
+      host:   process.env.SMTP_HOST,
+      port:   parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+  }
+
   const errors = [];
+  const sentEmails = [];
   for (const recipient of client.recipients) {
     const vars = {
       ...baseVars,
       first_name: recipient.firstName || '',
       last_name:  recipient.lastName  || '',
     };
+    const subject = renderTemplate(tmpl.subject, vars);
+    const html    = renderTemplate(tmpl.body,    vars);
+    const logId   = uuidv4();
+    let sgMessageId = null;
+
     try {
-      await transporter.sendMail({
-        from:    `"${fromName || client.fromName || 'Planeteria Media'}" <${fromEmail || client.fromEmail || 'noreply@planeteria.com'}>`,
-        to:      recipient.email,
-        cc:      ccEmail || undefined,
-        subject: renderTemplate(tmpl.subject, vars),
-        html:    renderTemplate(tmpl.body, vars),
-      });
+      if (useSendGrid) {
+        const sgBody = {
+          personalizations: [{ to: [{ email: recipient.email }] }],
+          from:    { email: effectiveFrom, name: effectiveFromName },
+          subject,
+          content: [{ type: 'text/html', value: html }],
+        };
+        if (ccEmail) sgBody.personalizations[0].cc = [{ email: ccEmail }];
+
+        const sgRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
+          method:  'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}`,
+            'Content-Type':  'application/json',
+          },
+          body: JSON.stringify(sgBody),
+        });
+        if (!sgRes.ok) {
+          const errText = await sgRes.text();
+          throw new Error(`SendGrid ${sgRes.status}: ${errText}`);
+        }
+        sgMessageId = sgRes.headers.get('x-message-id');
+      } else {
+        await transporter.sendMail({
+          from:    `"${effectiveFromName}" <${effectiveFrom}>`,
+          to:      recipient.email,
+          cc:      ccEmail || undefined,
+          subject,
+          html,
+        });
+      }
+
+      sentEmails.push(recipient.email);
+
+      // Log to DB — non-fatal
+      logEmailSent({
+        id: logId,
+        clientId:       client.id,
+        clientName:     client.name,
+        templateId:     tmpl.id,
+        templateName:   tmpl.name,
+        recipientEmail: recipient.email,
+        recipientName:  [recipient.firstName, recipient.lastName].filter(Boolean).join(' ') || null,
+        fromEmail:      effectiveFrom,
+        fromName:       effectiveFromName,
+        ccEmail:        ccEmail || null,
+        subject,
+        bodyHtml:       html,
+        sgMessageId,
+      }).catch(e => console.warn('[email-log] DB write failed:', e.message));
+
     } catch (err) {
       errors.push({ email: recipient.email, error: err.message });
     }
   }
 
-  if (errors.length > 0 && errors.length === client.recipients.length) {
+  if (errors.length > 0 && sentEmails.length === 0) {
     return res.status(500).json({ error: 'All emails failed', details: errors });
   }
   res.json({
     success: true,
-    sent: client.recipients.length - errors.length,
-    failed: errors.length,
+    sent:    sentEmails.length,
+    failed:  errors.length,
     details: errors.length ? errors : undefined,
   });
+});
+
+// SendGrid Event Webhook — no auth required (SendGrid posts here automatically)
+app.post('/api/campaign/email-events', express.json(), async (req, res) => {
+  res.sendStatus(200); // acknowledge immediately
+  const events = Array.isArray(req.body) ? req.body : [];
+  for (const event of events) {
+    try {
+      const sgMessageId = event.sg_message_id || event.smtp_id;
+      if (!sgMessageId) continue;
+      const ts = event.timestamp ? new Date(event.timestamp * 1000).toISOString() : new Date().toISOString();
+      const updates = { lastEventAt: ts };
+      switch (event.event) {
+        case 'delivered':   updates.status = 'delivered'; updates.deliveredAt = ts; break;
+        case 'open':        updates.status = 'opened';    updates.openedAt    = ts; break;
+        case 'click':       updates.status = 'clicked';   updates.clickedAt   = ts; break;
+        case 'bounce':
+        case 'blocked':
+        case 'spamreport':  updates.status = event.event; updates.bouncedAt   = ts; break;
+        default:            updates.status = event.event;
+      }
+      await updateEmailLogBySgId(sgMessageId, updates).catch(() => {});
+    } catch {}
+  }
+});
+
+// Manually refresh SendGrid status for one log entry
+app.post('/api/campaign/email-log/:id/refresh', schedulerAuth, async (req, res) => {
+  if (!process.env.SENDGRID_API_KEY) {
+    return res.status(400).json({ error: 'SendGrid not configured' });
+  }
+  try {
+    const row = await getEmailLogById(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Log entry not found' });
+    if (!row.sg_message_id) return res.status(400).json({ error: 'No SendGrid message ID for this entry' });
+
+    const sgRes = await fetch(
+      `https://api.sendgrid.com/v3/messages?msg_id=${encodeURIComponent(row.sg_message_id)}`,
+      { headers: { 'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}` } }
+    );
+    if (!sgRes.ok) {
+      const errText = await sgRes.text();
+      return res.status(502).json({ error: `SendGrid error ${sgRes.status}`, detail: errText });
+    }
+    const data = await sgRes.json();
+    const msgs = data.messages || [];
+    if (!msgs.length) return res.json({ refreshed: false, message: 'No data from SendGrid yet' });
+
+    const msg    = msgs[0];
+    const status = msg.status || 'unknown';
+    const updates = { status, lastEventAt: new Date().toISOString() };
+    if (status === 'delivered' && msg.last_event_time) updates.deliveredAt = msg.last_event_time;
+    await updateEmailLogBySgId(row.sg_message_id, updates);
+    res.json({ refreshed: true, status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Email log list API
+app.get('/api/campaign/email-log', schedulerAuth, async (req, res) => {
+  try {
+    const limit    = Math.min(parseInt(req.query.limit  || '50'), 200);
+    const offset   = parseInt(req.query.offset || '0');
+    const { clientId, status, search } = req.query;
+    const result = await getEmailLog({ limit, offset, clientId, status, search });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Email log page
+app.get('/campaign/email-log', (_req, res) => {
+  res.sendFile(join(__dirname, 'public', 'campaign-email-log.html'));
 });
 
 // Campaign export / import

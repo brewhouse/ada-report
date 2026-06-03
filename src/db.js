@@ -271,6 +271,38 @@ export async function initDb() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // campaign_email_log — one row per email sent; tracks SendGrid delivery events
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS campaign_email_log (
+        id              CHAR(36)      NOT NULL,
+        sent_at         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        client_id       VARCHAR(36)   DEFAULT NULL,
+        client_name     VARCHAR(500)  DEFAULT NULL,
+        template_id     VARCHAR(36)   DEFAULT NULL,
+        template_name   VARCHAR(255)  DEFAULT NULL,
+        recipient_email VARCHAR(255)  NOT NULL,
+        recipient_name  VARCHAR(255)  DEFAULT NULL,
+        from_email      VARCHAR(255)  DEFAULT NULL,
+        from_name       VARCHAR(255)  DEFAULT NULL,
+        cc_email        VARCHAR(255)  DEFAULT NULL,
+        subject         TEXT          DEFAULT NULL,
+        body_html       LONGTEXT      DEFAULT NULL,
+        sg_message_id   VARCHAR(255)  DEFAULT NULL,
+        status          VARCHAR(50)   DEFAULT 'sent',
+        delivered_at    DATETIME      DEFAULT NULL,
+        opened_at       DATETIME      DEFAULT NULL,
+        clicked_at      DATETIME      DEFAULT NULL,
+        bounced_at      DATETIME      DEFAULT NULL,
+        last_event_at   DATETIME      DEFAULT NULL,
+        events_json     JSON          DEFAULT NULL,
+        PRIMARY KEY (id),
+        INDEX idx_el_client    (client_id),
+        INDEX idx_el_recipient (recipient_email(191)),
+        INDEX idx_el_sent_at   (sent_at),
+        INDEX idx_el_sg_id     (sg_message_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     console.log('[db] All tables initialised');
   } finally {
     conn.release();
@@ -994,6 +1026,110 @@ export async function updateClientCms(id, cms) {
     `UPDATE campaign_clients SET cms_detected = ?, cms_detected_at = NOW() WHERE id = ?`,
     [cms || '', id]
   );
+}
+
+// ── Campaign: email log ───────────────────────────────────────────────────────
+
+export async function logEmailSent({
+  id, clientId, clientName, templateId, templateName,
+  recipientEmail, recipientName, fromEmail, fromName,
+  ccEmail, subject, bodyHtml, sgMessageId,
+}) {
+  await pool.execute(
+    `INSERT INTO campaign_email_log
+       (id, client_id, client_name, template_id, template_name,
+        recipient_email, recipient_name, from_email, from_name,
+        cc_email, subject, body_html, sg_message_id, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sent')`,
+    [
+      id,
+      clientId    ?? null, clientName    ?? null,
+      templateId  ?? null, templateName  ?? null,
+      recipientEmail,      recipientName ?? null,
+      fromEmail   ?? null, fromName      ?? null,
+      ccEmail     ?? null, subject       ?? null,
+      bodyHtml    ?? null, sgMessageId   ?? null,
+    ]
+  );
+}
+
+export async function updateEmailLogBySgId(sgMessageId, updates) {
+  const sets   = [];
+  const values = [];
+  if ('status'      in updates) { sets.push('status = ?');        values.push(updates.status); }
+  if ('deliveredAt' in updates) { sets.push('delivered_at = ?');  values.push(updates.deliveredAt ? new Date(updates.deliveredAt) : null); }
+  if ('openedAt'    in updates) { sets.push('opened_at = ?');     values.push(updates.openedAt    ? new Date(updates.openedAt)    : null); }
+  if ('clickedAt'   in updates) { sets.push('clicked_at = ?');    values.push(updates.clickedAt   ? new Date(updates.clickedAt)   : null); }
+  if ('bouncedAt'   in updates) { sets.push('bounced_at = ?');    values.push(updates.bouncedAt   ? new Date(updates.bouncedAt)   : null); }
+  if ('lastEventAt' in updates) { sets.push('last_event_at = ?'); values.push(updates.lastEventAt ? new Date(updates.lastEventAt) : null); }
+  if ('eventsJson'  in updates) { sets.push('events_json = ?');   values.push(JSON.stringify(updates.eventsJson)); }
+  if (sets.length === 0) return;
+  values.push(sgMessageId);
+  await pool.execute(
+    `UPDATE campaign_email_log SET ${sets.join(', ')} WHERE sg_message_id = ?`,
+    values
+  );
+}
+
+export async function getEmailLogById(id) {
+  const [rows] = await pool.execute(
+    'SELECT * FROM campaign_email_log WHERE id = ?', [id]
+  );
+  return rows[0] || null;
+}
+
+export async function getEmailLog({ limit = 50, offset = 0, clientId, status, search } = {}) {
+  const where  = [];
+  const params = [];
+  if (clientId) { where.push('client_id = ?');  params.push(clientId); }
+  if (status)   { where.push('status = ?');      params.push(status); }
+  if (search) {
+    where.push('(recipient_email LIKE ? OR client_name LIKE ? OR subject LIKE ?)');
+    const q = `%${search}%`;
+    params.push(q, q, q);
+  }
+  const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+  const [countRows] = await pool.execute(
+    `SELECT COUNT(*) AS cnt FROM campaign_email_log ${clause}`, params
+  );
+  const total = Number(countRows[0].cnt);
+
+  const [rows] = await pool.execute(
+    `SELECT id, sent_at, client_id, client_name, template_id, template_name,
+            recipient_email, recipient_name, from_email, from_name, cc_email,
+            subject, sg_message_id, status,
+            delivered_at, opened_at, clicked_at, bounced_at, last_event_at
+     FROM campaign_email_log
+     ${clause}
+     ORDER BY sent_at DESC
+     LIMIT ? OFFSET ?`,
+    [...params, parseInt(limit), parseInt(offset)]
+  );
+
+  const items = rows.map(r => ({
+    id:             r.id,
+    sentAt:         r.sent_at       ? new Date(r.sent_at).toISOString()       : null,
+    clientId:       r.client_id,
+    clientName:     r.client_name,
+    templateId:     r.template_id,
+    templateName:   r.template_name,
+    recipientEmail: r.recipient_email,
+    recipientName:  r.recipient_name,
+    fromEmail:      r.from_email,
+    fromName:       r.from_name,
+    ccEmail:        r.cc_email,
+    subject:        r.subject,
+    sgMessageId:    r.sg_message_id,
+    status:         r.status,
+    deliveredAt:    r.delivered_at  ? new Date(r.delivered_at).toISOString()  : null,
+    openedAt:       r.opened_at     ? new Date(r.opened_at).toISOString()     : null,
+    clickedAt:      r.clicked_at    ? new Date(r.clicked_at).toISOString()    : null,
+    bouncedAt:      r.bounced_at    ? new Date(r.bounced_at).toISOString()    : null,
+    lastEventAt:    r.last_event_at ? new Date(r.last_event_at).toISOString() : null,
+  }));
+
+  return { total, items };
 }
 
 // ── Campaign: email templates ─────────────────────────────────────────────────

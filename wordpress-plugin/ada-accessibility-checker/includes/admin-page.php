@@ -72,6 +72,8 @@ function ada_render_results_page() {
 				<iframe
 					id="ada-results-iframe"
 					src="<?php echo esc_url( $iframe_url ); ?>"
+					width="100%"
+					height="1800"
 					title="ADA Accessibility Results for <?php echo esc_attr( $site_url ); ?>"
 					allowfullscreen
 				></iframe>
