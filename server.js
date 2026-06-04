@@ -25,7 +25,7 @@ import {
   getCampaignClients, upsertCampaignClient, deleteCampaignClient,
   updateClientScanResults, updateClientPdfResults, updateClientCms,
   getCampaignTemplates, upsertCampaignTemplate, deleteCampaignTemplate,
-  logEmailSent, updateEmailLogBySgId, getEmailLogById, getEmailLog,
+  logEmailSent, updateEmailLogBySgId, getEmailLogById, getEmailLog, getPendingEmailLog,
 } from './src/db.js';
 import { uploadReportPdfs } from './src/s3.js';
 
@@ -1995,6 +1995,40 @@ app.post('/api/campaign/email-events', express.json(), async (req, res) => {
       }
       await updateEmailLogBySgId(sgMessageId, updates).catch(() => {});
     } catch {}
+  }
+});
+
+// Bulk-sync pending (status='sent') entries from SendGrid Activity API
+app.post('/api/campaign/email-log/sync-pending', schedulerAuth, async (req, res) => {
+  if (!process.env.SENDGRID_API_KEY) {
+    return res.status(400).json({ error: 'SendGrid not configured' });
+  }
+  try {
+    const pending = await getPendingEmailLog();
+    if (!pending.length) return res.json({ synced: 0, updated: 0 });
+
+    let updated = 0;
+    for (const row of pending) {
+      try {
+        const sgRes = await fetch(
+          `https://api.sendgrid.com/v3/messages?msg_id=${encodeURIComponent(row.sg_message_id)}`,
+          { headers: { 'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}` } }
+        );
+        if (!sgRes.ok) continue;
+        const data = await sgRes.json();
+        const msg  = (data.messages || [])[0];
+        if (!msg) continue;
+
+        const status = msg.status || 'unknown';
+        const updates = { status, lastEventAt: new Date().toISOString() };
+        if (status === 'delivered' && msg.last_event_time) updates.deliveredAt = msg.last_event_time;
+        await updateEmailLogBySgId(row.sg_message_id, updates);
+        updated++;
+      } catch {}
+    }
+    res.json({ synced: pending.length, updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

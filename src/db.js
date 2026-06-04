@@ -1078,6 +1078,15 @@ export async function getEmailLogById(id) {
   return rows[0] || null;
 }
 
+export async function getPendingEmailLog() {
+  const [rows] = await pool.execute(
+    `SELECT id, sg_message_id FROM campaign_email_log
+     WHERE status = 'sent' AND sg_message_id IS NOT NULL
+     ORDER BY sent_at DESC LIMIT 200`
+  );
+  return rows;
+}
+
 export async function getEmailLog({ limit = 50, offset = 0, clientId, status, search } = {}) {
   const where  = [];
   const params = [];

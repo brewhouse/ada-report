@@ -297,12 +297,23 @@
     }
   }
 
-  // ── Refresh all (reload data + stats) ────────────────────────────────────────
+  // ── Refresh all — sync pending rows from SendGrid then reload ────────────────
 
-  function refreshAll() {
-    loadLog();
-    loadStats();
-    toast('Refreshed');
+  async function refreshAll() {
+    const btn = document.getElementById('el-refresh-all-btn');
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+    try {
+      const data = await api('POST', '/api/campaign/email-log/sync-pending');
+      if (data) toast(`Synced ${data.synced} rows, updated ${data.updated}`);
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Refresh All';
+    }
+    await loadLog();
+    await loadStats();
   }
 
   // ── Login ─────────────────────────────────────────────────────────────────────
