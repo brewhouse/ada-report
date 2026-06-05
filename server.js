@@ -1932,7 +1932,7 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
         }
         sgMessageId = sgRes.headers.get('x-message-id');
       } else {
-        await transporter.sendMail({
+        const info = await transporter.sendMail({
           from:    `"${effectiveFromName}" <${effectiveFrom}>`,
           to:      recipient.email,
           cc:      ccEmail      || undefined,
@@ -1940,6 +1940,9 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
           subject,
           html,
         });
+        // SendGrid SMTP returns "250 Ok: queued as <id>" — extract the tracking ID
+        const match = (info.response || '').match(/queued as ([A-Za-z0-9._-]+)/i);
+        if (match) sgMessageId = match[1].split('.')[0];
       }
 
       sentEmails.push(recipient.email);
@@ -1983,8 +1986,10 @@ app.post('/api/campaign/email-events', express.json(), async (req, res) => {
   const events = Array.isArray(req.body) ? req.body : [];
   for (const event of events) {
     try {
-      const sgMessageId = event.sg_message_id || event.smtp_id;
-      if (!sgMessageId) continue;
+      // Normalize: strip filter suffixes like ".filterdrecv-p3..." that SMTP relay appends
+      const rawId = event.sg_message_id || event.smtp_id;
+      if (!rawId) continue;
+      const sgMessageId = rawId.split('.')[0];
       const ts = event.timestamp ? new Date(event.timestamp * 1000).toISOString() : new Date().toISOString();
       const updates = { lastEventAt: ts };
       switch (event.event) {
