@@ -266,10 +266,15 @@ export async function initDb() {
         name       VARCHAR(255) NOT NULL,
         subject    VARCHAR(500) NOT NULL,
         body       MEDIUMTEXT   NOT NULL,
+        from_email VARCHAR(255) DEFAULT NULL,
+        bcc_email  VARCHAR(255) DEFAULT NULL,
         created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    // Migrate existing deployments
+    await conn.execute(`ALTER TABLE campaign_email_templates ADD COLUMN IF NOT EXISTS from_email VARCHAR(255) DEFAULT NULL`).catch(() => {});
+    await conn.execute(`ALTER TABLE campaign_email_templates ADD COLUMN IF NOT EXISTS bcc_email  VARCHAR(255) DEFAULT NULL`).catch(() => {});
 
     // campaign_email_log — one row per email sent; tracks SendGrid delivery events
     await conn.execute(`
@@ -1149,18 +1154,21 @@ export async function getCampaignTemplates() {
   );
   return rows.map(r => ({
     id: r.id, name: r.name, subject: r.subject, body: r.body,
+    fromEmail: r.from_email || null,
+    bccEmail:  r.bcc_email  || null,
     createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
   }));
 }
 
 export async function upsertCampaignTemplate(tmpl) {
-  const { id, name, subject, body } = tmpl;
+  const { id, name, subject, body, fromEmail, bccEmail } = tmpl;
   await pool.execute(
-    `INSERT INTO campaign_email_templates (id, name, subject, body)
-     VALUES (?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE name = VALUES(name), subject = VALUES(subject), body = VALUES(body)`,
-    [id, name, subject, body]
+    `INSERT INTO campaign_email_templates (id, name, subject, body, from_email, bcc_email)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE name = VALUES(name), subject = VALUES(subject),
+       body = VALUES(body), from_email = VALUES(from_email), bcc_email = VALUES(bcc_email)`,
+    [id, name, subject, body, fromEmail ?? null, bccEmail ?? null]
   );
   const all = await getCampaignTemplates();
   return all.find(t => t.id === id);

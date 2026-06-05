@@ -241,9 +241,11 @@ let editingId = null;
 function resetForm() {
   editingId = null;
   document.getElementById('tmpl-modal-title').textContent = 'Add Template';
-  document.getElementById('f-tname').value   = '';
-  document.getElementById('f-subject').value = '';
-  document.getElementById('f-body').value    = '';
+  document.getElementById('f-tname').value      = '';
+  document.getElementById('f-from-email').value = '';
+  document.getElementById('f-bcc-email').value  = 'planeteria_board_18415768357_df9dd2be8427a618f717__48675235@use1.mx.monday.com';
+  document.getElementById('f-subject').value    = '';
+  document.getElementById('f-body').value       = '';
   refreshPreview();
 }
 
@@ -260,9 +262,11 @@ async function openEditModal(id) {
     if (!t) return;
     editingId = id;
     document.getElementById('tmpl-modal-title').textContent = 'Edit Template';
-    document.getElementById('f-tname').value   = t.name    || '';
-    document.getElementById('f-subject').value = t.subject || '';
-    document.getElementById('f-body').value    = t.body    || '';
+    document.getElementById('f-tname').value      = t.name      || '';
+    document.getElementById('f-from-email').value = t.fromEmail || '';
+    document.getElementById('f-bcc-email').value  = t.bccEmail  || 'planeteria_board_18415768357_df9dd2be8427a618f717__48675235@use1.mx.monday.com';
+    document.getElementById('f-subject').value    = t.subject   || '';
+    document.getElementById('f-body').value       = t.body      || '';
     refreshPreview();
     openModal('tmpl-modal');
   } catch (err) {
@@ -271,9 +275,11 @@ async function openEditModal(id) {
 }
 
 document.getElementById('tmpl-modal-save').addEventListener('click', async () => {
-  const name    = document.getElementById('f-tname').value.trim();
-  const subject = document.getElementById('f-subject').value.trim();
-  const body    = document.getElementById('f-body').value.trim();
+  const name      = document.getElementById('f-tname').value.trim();
+  const fromEmail = document.getElementById('f-from-email').value.trim() || null;
+  const bccEmail  = document.getElementById('f-bcc-email').value.trim()  || null;
+  const subject   = document.getElementById('f-subject').value.trim();
+  const body      = document.getElementById('f-body').value.trim();
   if (!name)    { showToast('Template name is required', true); return; }
   if (!subject) { showToast('Email subject is required', true); return; }
   if (!body)    { showToast('Email body is required', true); return; }
@@ -286,7 +292,7 @@ document.getElementById('tmpl-modal-save').addEventListener('click', async () =>
     const endpoint = editingId ? `/api/campaign/templates/${editingId}` : '/api/campaign/templates';
     const method   = editingId ? 'PUT' : 'POST';
     const res = await fetch(endpoint, {
-      method, headers: authHeaders(), body: JSON.stringify({ name, subject, body }),
+      method, headers: authHeaders(), body: JSON.stringify({ name, fromEmail, bccEmail, subject, body }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Save failed');

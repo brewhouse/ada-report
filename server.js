@@ -1836,7 +1836,7 @@ app.post('/api/campaign/clients/:id/reparse-pdf', schedulerAuth, async (req, res
 
 // Send campaign email using a template to all recipients of a client
 app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res) => {
-  const { templateId, ccEmail, fromEmail, fromName } = req.body;
+  const { templateId, ccEmail, bccEmail, fromEmail, fromName } = req.body;
   if (!templateId) return res.status(400).json({ error: 'templateId is required' });
 
   const useSendGrid = !!process.env.SENDGRID_API_KEY;
@@ -1855,8 +1855,9 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
   const tmpl = templates.find(t => t.id === templateId);
   if (!tmpl) return res.status(404).json({ error: 'Template not found' });
 
-  const effectiveFrom     = fromEmail || client.fromEmail || 'noreply@planeteria.com';
+  const effectiveFrom     = fromEmail || tmpl.fromEmail || client.fromEmail || 'noreply@planeteria.com';
   const effectiveFromName = fromName  || client.fromName  || 'Planeteria Media';
+  const effectiveBcc      = bccEmail  || tmpl.bccEmail  || null;
 
   function renderTemplate(str, vars) {
     return str.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
@@ -1914,7 +1915,8 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
           subject,
           content: [{ type: 'text/html', value: html }],
         };
-        if (ccEmail) sgBody.personalizations[0].cc = [{ email: ccEmail }];
+        if (ccEmail)      sgBody.personalizations[0].cc  = [{ email: ccEmail }];
+        if (effectiveBcc) sgBody.personalizations[0].bcc = [{ email: effectiveBcc }];
 
         const sgRes = await fetch('https://api.sendgrid.com/v3/mail/send', {
           method:  'POST',
@@ -1933,7 +1935,8 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
         await transporter.sendMail({
           from:    `"${effectiveFromName}" <${effectiveFrom}>`,
           to:      recipient.email,
-          cc:      ccEmail || undefined,
+          cc:      ccEmail      || undefined,
+          bcc:     effectiveBcc || undefined,
           subject,
           html,
         });
@@ -2120,26 +2123,28 @@ app.get('/api/campaign/templates', schedulerAuth, async (_req, res) => {
 });
 
 app.post('/api/campaign/templates', schedulerAuth, async (req, res) => {
-  const { name, subject, body } = req.body;
+  const { name, subject, body, fromEmail, bccEmail } = req.body;
   if (!name)    return res.status(400).json({ error: 'name is required' });
   if (!subject) return res.status(400).json({ error: 'subject is required' });
   if (!body)    return res.status(400).json({ error: 'body is required' });
   try {
-    const tmpl = await upsertCampaignTemplate({ id: uuidv4(), name, subject, body });
+    const tmpl = await upsertCampaignTemplate({ id: uuidv4(), name, subject, body, fromEmail, bccEmail });
     res.status(201).json(tmpl);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/campaign/templates/:id', schedulerAuth, async (req, res) => {
-  const { name, subject, body } = req.body;
+  const { name, subject, body, fromEmail, bccEmail } = req.body;
   try {
     const existing = (await getCampaignTemplates()).find(t => t.id === req.params.id);
     if (!existing) return res.status(404).json({ error: 'Template not found' });
     const updated = await upsertCampaignTemplate({
-      id:      req.params.id,
-      name:    name    ?? existing.name,
-      subject: subject ?? existing.subject,
-      body:    body    ?? existing.body,
+      id:        req.params.id,
+      name:      name      ?? existing.name,
+      subject:   subject   ?? existing.subject,
+      body:      body      ?? existing.body,
+      fromEmail: fromEmail !== undefined ? fromEmail : existing.fromEmail,
+      bccEmail:  bccEmail  !== undefined ? bccEmail  : existing.bccEmail,
     });
     res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }

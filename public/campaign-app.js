@@ -550,8 +550,9 @@ async function sendEmail(clientId, btn) {
       : r.email
     ).join(', ');
   document.getElementById('sm-from-name').value  = client.fromName  || 'Planeteria Media';
-  document.getElementById('sm-from-email').value = client.fromEmail || 'noreply@planeteria.com';
+  document.getElementById('sm-from-email').value = tmpl?.fromEmail || client.fromEmail || 'noreply@planeteria.com';
   document.getElementById('sm-cc-email').value   = '';
+  document.getElementById('sm-bcc-email').value  = tmpl?.bccEmail || '';
 
   pendingSendClientId   = clientId;
   pendingSendTemplateId = templateId;
@@ -566,6 +567,7 @@ async function executeSend() {
   const fromName  = document.getElementById('sm-from-name').value.trim();
   const fromEmail = document.getElementById('sm-from-email').value.trim();
   const ccEmail   = document.getElementById('sm-cc-email').value.trim();
+  const bccEmail  = document.getElementById('sm-bcc-email').value.trim();
 
   closeModal('cmp-send-modal');
   pendingSendClientId = pendingSendTemplateId = pendingSendBtn = null;
@@ -579,6 +581,7 @@ async function executeSend() {
         fromName:  fromName  || undefined,
         fromEmail: fromEmail || undefined,
         ccEmail:   ccEmail   || undefined,
+        bccEmail:  bccEmail  || undefined,
       }),
     });
     const data = await res.json();
