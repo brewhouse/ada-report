@@ -549,7 +549,7 @@ async function sendEmail(clientId, btn) {
       ? `${r.email} (${[r.firstName, r.lastName].filter(Boolean).join(' ')})`
       : r.email
     ).join(', ');
-  document.getElementById('sm-from-name').value  = client.fromName  || 'Planeteria Media';
+  document.getElementById('sm-from-name').value  = tmpl?.fromName  || client.fromName  || 'Planeteria Media';
   document.getElementById('sm-from-email').value = tmpl?.fromEmail || client.fromEmail || 'noreply@planeteria.com';
   document.getElementById('sm-cc-email').value   = '';
   document.getElementById('sm-bcc-email').value  = tmpl?.bccEmail || '';

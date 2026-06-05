@@ -242,6 +242,7 @@ function resetForm() {
   editingId = null;
   document.getElementById('tmpl-modal-title').textContent = 'Add Template';
   document.getElementById('f-tname').value      = '';
+  document.getElementById('f-from-name').value  = '';
   document.getElementById('f-from-email').value = '';
   document.getElementById('f-bcc-email').value  = 'planeteria_board_18415768357_df9dd2be8427a618f717__48675235@use1.mx.monday.com';
   document.getElementById('f-subject').value    = '';
@@ -263,6 +264,7 @@ async function openEditModal(id) {
     editingId = id;
     document.getElementById('tmpl-modal-title').textContent = 'Edit Template';
     document.getElementById('f-tname').value      = t.name      || '';
+    document.getElementById('f-from-name').value  = t.fromName  || '';
     document.getElementById('f-from-email').value = t.fromEmail || '';
     document.getElementById('f-bcc-email').value  = t.bccEmail  || 'planeteria_board_18415768357_df9dd2be8427a618f717__48675235@use1.mx.monday.com';
     document.getElementById('f-subject').value    = t.subject   || '';
@@ -276,6 +278,7 @@ async function openEditModal(id) {
 
 document.getElementById('tmpl-modal-save').addEventListener('click', async () => {
   const name      = document.getElementById('f-tname').value.trim();
+  const fromName  = document.getElementById('f-from-name').value.trim()  || null;
   const fromEmail = document.getElementById('f-from-email').value.trim() || null;
   const bccEmail  = document.getElementById('f-bcc-email').value.trim()  || null;
   const subject   = document.getElementById('f-subject').value.trim();
@@ -292,7 +295,7 @@ document.getElementById('tmpl-modal-save').addEventListener('click', async () =>
     const endpoint = editingId ? `/api/campaign/templates/${editingId}` : '/api/campaign/templates';
     const method   = editingId ? 'PUT' : 'POST';
     const res = await fetch(endpoint, {
-      method, headers: authHeaders(), body: JSON.stringify({ name, fromEmail, bccEmail, subject, body }),
+      method, headers: authHeaders(), body: JSON.stringify({ name, fromName, fromEmail, bccEmail, subject, body }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Save failed');

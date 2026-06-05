@@ -1856,7 +1856,7 @@ app.post('/api/campaign/clients/:id/send-email', schedulerAuth, async (req, res)
   if (!tmpl) return res.status(404).json({ error: 'Template not found' });
 
   const effectiveFrom     = fromEmail || tmpl.fromEmail || client.fromEmail || 'noreply@planeteria.com';
-  const effectiveFromName = fromName  || client.fromName  || 'Planeteria Media';
+  const effectiveFromName = fromName  || tmpl.fromName  || client.fromName  || 'Planeteria Media';
   const effectiveBcc      = bccEmail  || tmpl.bccEmail  || null;
 
   function renderTemplate(str, vars) {
@@ -2128,18 +2128,18 @@ app.get('/api/campaign/templates', schedulerAuth, async (_req, res) => {
 });
 
 app.post('/api/campaign/templates', schedulerAuth, async (req, res) => {
-  const { name, subject, body, fromEmail, bccEmail } = req.body;
+  const { name, subject, body, fromEmail, fromName, bccEmail } = req.body;
   if (!name)    return res.status(400).json({ error: 'name is required' });
   if (!subject) return res.status(400).json({ error: 'subject is required' });
   if (!body)    return res.status(400).json({ error: 'body is required' });
   try {
-    const tmpl = await upsertCampaignTemplate({ id: uuidv4(), name, subject, body, fromEmail, bccEmail });
+    const tmpl = await upsertCampaignTemplate({ id: uuidv4(), name, subject, body, fromEmail, fromName, bccEmail });
     res.status(201).json(tmpl);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/campaign/templates/:id', schedulerAuth, async (req, res) => {
-  const { name, subject, body, fromEmail, bccEmail } = req.body;
+  const { name, subject, body, fromEmail, fromName, bccEmail } = req.body;
   try {
     const existing = (await getCampaignTemplates()).find(t => t.id === req.params.id);
     if (!existing) return res.status(404).json({ error: 'Template not found' });
@@ -2149,6 +2149,7 @@ app.put('/api/campaign/templates/:id', schedulerAuth, async (req, res) => {
       subject:   subject   ?? existing.subject,
       body:      body      ?? existing.body,
       fromEmail: fromEmail !== undefined ? fromEmail : existing.fromEmail,
+      fromName:  fromName  !== undefined ? fromName  : existing.fromName,
       bccEmail:  bccEmail  !== undefined ? bccEmail  : existing.bccEmail,
     });
     res.json(updated);

@@ -43,6 +43,14 @@ const pool = mysql.createPool({
 
 // ── Table initialisation ──────────────────────────────────────────────────────
 
+async function addColumn(conn, table, column, definition) {
+  try {
+    await conn.execute(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+  } catch (e) {
+    if (e.code !== 'ER_DUP_FIELDNAME') throw e; // ignore "already exists", re-throw anything else
+  }
+}
+
 export async function initDb() {
   const conn = await pool.getConnection();
   try {
@@ -267,14 +275,16 @@ export async function initDb() {
         subject    VARCHAR(500) NOT NULL,
         body       MEDIUMTEXT   NOT NULL,
         from_email VARCHAR(255) DEFAULT NULL,
+        from_name  VARCHAR(255) DEFAULT NULL,
         bcc_email  VARCHAR(255) DEFAULT NULL,
         created_at DATETIME     DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    // Migrate existing deployments
-    await conn.execute(`ALTER TABLE campaign_email_templates ADD COLUMN IF NOT EXISTS from_email VARCHAR(255) DEFAULT NULL`).catch(() => {});
-    await conn.execute(`ALTER TABLE campaign_email_templates ADD COLUMN IF NOT EXISTS bcc_email  VARCHAR(255) DEFAULT NULL`).catch(() => {});
+    // Migrate existing deployments (addColumn ignores ER_DUP_FIELDNAME)
+    await addColumn(conn, 'campaign_email_templates', 'from_email', 'VARCHAR(255) DEFAULT NULL');
+    await addColumn(conn, 'campaign_email_templates', 'from_name',  'VARCHAR(255) DEFAULT NULL');
+    await addColumn(conn, 'campaign_email_templates', 'bcc_email',  'VARCHAR(255) DEFAULT NULL');
 
     // campaign_email_log — one row per email sent; tracks SendGrid delivery events
     await conn.execute(`
@@ -1155,6 +1165,7 @@ export async function getCampaignTemplates() {
   return rows.map(r => ({
     id: r.id, name: r.name, subject: r.subject, body: r.body,
     fromEmail: r.from_email || null,
+    fromName:  r.from_name  || null,
     bccEmail:  r.bcc_email  || null,
     createdAt: r.created_at ? new Date(r.created_at).toISOString() : null,
     updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : null,
@@ -1162,13 +1173,14 @@ export async function getCampaignTemplates() {
 }
 
 export async function upsertCampaignTemplate(tmpl) {
-  const { id, name, subject, body, fromEmail, bccEmail } = tmpl;
+  const { id, name, subject, body, fromEmail, fromName, bccEmail } = tmpl;
   await pool.execute(
-    `INSERT INTO campaign_email_templates (id, name, subject, body, from_email, bcc_email)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO campaign_email_templates (id, name, subject, body, from_email, from_name, bcc_email)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE name = VALUES(name), subject = VALUES(subject),
-       body = VALUES(body), from_email = VALUES(from_email), bcc_email = VALUES(bcc_email)`,
-    [id, name, subject, body, fromEmail ?? null, bccEmail ?? null]
+       body = VALUES(body), from_email = VALUES(from_email),
+       from_name = VALUES(from_name), bcc_email = VALUES(bcc_email)`,
+    [id, name, subject, body, fromEmail ?? null, fromName ?? null, bccEmail ?? null]
   );
   const all = await getCampaignTemplates();
   return all.find(t => t.id === id);
