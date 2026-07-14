@@ -10,6 +10,7 @@ import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit, rescanPage, forceReleaseGlobalSlot, getGlobalAuditCount } from './src/audit-manager.js';
 import { killAllChrome, countChromeProcesses } from './src/lighthouse-runner.js';
+import { startTmpJanitor, sweepChromeTmp } from './src/tmp-janitor.js';
 import { generateReport, generateSummaryReport, generateVpatReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
 import {
@@ -1145,8 +1146,10 @@ app.get('/api/system-status', (_req, res) => {
 // release any stuck semaphore slots.  Does NOT restart the process — just
 // clears the stuck state so new audits can launch immediately.
 app.post('/api/system-reset', (_req, res) => {
-  // 1. Kill every Chrome process
+  // 1. Kill every Chrome process, then reclaim the /tmp files they abandoned.
+  //    Safe to force here: nothing is left alive to own them.
   killAllChrome();
+  const swept = sweepChromeTmp({ force: true });
 
   // 2. Cancel all queued (not yet started) audits
   const cancelledQueue = [];
@@ -1192,6 +1195,8 @@ app.post('/api/system-reset', (_req, res) => {
   res.json({
     success: true,
     chromeKilled:     true,
+    tmpReclaimedMb:   +(swept.bytes / 1024 / 1024).toFixed(1),
+    tmpEntriesRemoved: swept.removed,
     cancelledQueue,
     cancelledActive,
     slotsReleased:    slotsHeld,
@@ -2168,6 +2173,12 @@ app.get('*', (_req, res) => {
 // ── Startup ────────────────────────────────────────────────────────────────────
 
 await mkdir(DATA_DIR, { recursive: true }).catch(() => {});
+
+// Chrome processes and /tmp litter can outlive the Node process inside a
+// container.  Clear both before the first audit runs, then sweep hourly —
+// Render replaces the instance if /tmp passes 2GB.
+killAllChrome();
+startTmpJanitor();
 
 // DB connection is non-fatal — if the MySQL server is unreachable (e.g. firewall)
 // the app starts in degraded mode with in-memory-only storage and logs a warning.
