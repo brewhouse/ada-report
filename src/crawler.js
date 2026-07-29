@@ -1,6 +1,7 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import puppeteer from 'puppeteer';
+import { openTab, closeTab } from './lighthouse-runner.js';
 
 const SKIP_EXTENSIONS = new Set([
   'jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'ico', 'bmp', 'tiff',
@@ -215,7 +216,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
   const pages = [];
 
   async function crawlPage(url) {
-    const page = await browser.newPage();
+    const page = await openTab(browser);
     try {
       await page.setUserAgent(BROWSER_UA);
 
@@ -259,7 +260,7 @@ async function crawlWithBrowser(rootUrl, maxPages, onProgress, excludeUrls = nul
     } catch (err) {
       console.warn(`[crawler] browser skip ${url}: ${err.message}`);
     } finally {
-      await page.close().catch(() => {});
+      await closeTab(page);
     }
   }
 

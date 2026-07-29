@@ -5,6 +5,7 @@ import { join } from 'path';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
 import { startAudit } from './audit-manager.js';
+import { openTab, closeTab } from './lighthouse-runner.js';
 import { generateReport, generateSummaryReport, generateVpatReport } from './report-generator.js';
 import {
   upsertScheduleToDb, deleteScheduleFromDb,
@@ -70,7 +71,7 @@ async function generatePdfBuffer(htmlContent) {
     executablePath,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
   });
-  const page = await browser.newPage();
+  const page = await openTab(browser);
   try {
     await page.setContent(htmlContent, { waitUntil: 'networkidle0', timeout: 60000 });
     return await page.pdf({
@@ -79,6 +80,7 @@ async function generatePdfBuffer(htmlContent) {
       margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
     });
   } finally {
+    await closeTab(page);
     await browser.close().catch(() => {});
   }
 }
@@ -284,11 +286,10 @@ async function runScheduledAudit(scheduleId) {
 
       const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
 
-      const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
-        generatePdfBuffer(generateSummaryReport(session, brand, false, ignoredIssuesList)),
-        generatePdfBuffer(generateReport(session, brand, false, ignoredIssuesList)),
-        generatePdfBuffer(generateVpatReport(session, brand, ignoredIssuesList)),
-      ]);
+      // Rendered one at a time on purpose — see the same note in server.js.
+      const summaryPdf = await generatePdfBuffer(generateSummaryReport(session, brand, false, ignoredIssuesList));
+      const detailPdf  = await generatePdfBuffer(generateReport(session, brand, false, ignoredIssuesList));
+      const vpatPdf    = await generatePdfBuffer(generateVpatReport(session, brand, ignoredIssuesList));
 
       // Upload to S3 for persistent access.
       const s3Links = await uploadReportPdfs({

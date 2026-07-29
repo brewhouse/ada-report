@@ -159,10 +159,60 @@ const SCORE_PENALTY_CAP = { critical: 25, serious: 15, moderate: 8,  minor: 4   
 // axe timeout — color-contrast is CPU-intensive, so allow 2 minutes.
 const AXE_TIMEOUT_MS = 120_000;
 
+// ── Global tab (renderer) budget ─────────────────────────────────────────────
+// Chrome's memory is dominated by RENDERER processes, not browser processes:
+// an open tab running axe-core against a real page holds 250–400 MB, while an
+// idle browser process is ~100 MB.  Every audit opens 3 tabs concurrently
+// (desktop axe + mobile axe + IBM), so a pool of N browsers is really ~3N
+// renderers — which is how a "24 browser" pool reached 32 GB and got OOM-killed.
+//
+// Every Chrome-using code path funnels through openTab(), so this is the single
+// place that bounds total Chrome RSS regardless of how many browsers exist or
+// which path (audit pool, rescan, auto-rescan, PDF, crawl) opened them.
+const MAX_CONCURRENT_TABS = Number(process.env.MAX_CONCURRENT_TABS) || 16;
+let _openTabs = 0;
+const _tabWaiters = [];
+
+function _acquireTab() {
+  if (_openTabs < MAX_CONCURRENT_TABS) { _openTabs++; return Promise.resolve(); }
+  return new Promise(resolve => _tabWaiters.push(resolve));
+}
+
+function _releaseTab() {
+  if (_tabWaiters.length > 0) _tabWaiters.shift()();
+  else if (_openTabs > 0) _openTabs--;
+}
+
+export function getTabStats() {
+  return { open: _openTabs, waiting: _tabWaiters.length, max: MAX_CONCURRENT_TABS };
+}
+
+// Open a tab against the global budget. Callers MUST pair this with closeTab()
+// in a finally block — that is what returns the slot.
+export async function openTab(browser) {
+  await _acquireTab();
+  try {
+    return await browser.newPage();
+  } catch (err) {
+    _releaseTab(); // never opened — don't strand the slot
+    throw err;
+  }
+}
+
+// Close a tab and return its slot. The slot is released even if close() hangs,
+// so one wedged renderer cannot deadlock the budget for everyone else.
+export async function closeTab(page) {
+  await Promise.race([
+    page.close().catch(() => {}),
+    new Promise(r => setTimeout(r, 5_000)),
+  ]);
+  _releaseTab();
+}
+
 // ── WCAG 2.2 custom Puppeteer checks ─────────────────────────────────────────
 // Covers 2.4.11 / 2.5.7 / 3.2.6 / 3.3.7 / 3.3.8 which axe-core does not test.
 async function runWcag22Audit(url, browser) {
-  const page = await browser.newPage();
+  const page = await openTab(browser);
   try {
     await page.setDefaultNavigationTimeout(60_000);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -283,10 +333,7 @@ async function runWcag22Audit(url, browser) {
 
     return raw;
   } finally {
-    await Promise.race([
-      page.close().catch(() => {}),
-      new Promise(r => setTimeout(r, 5_000)),
-    ]);
+    await closeTab(page);
   }
 }
 
@@ -298,7 +345,7 @@ async function runWcag22Audit(url, browser) {
 // Returns { reflowIssues, violations } — raw violations so the caller can
 // deduplicate against desktop findings before building issue objects.
 async function runMobileAxeAudit(url, browser) {
-  const page = await browser.newPage();
+  const page = await openTab(browser);
   try {
     await page.setViewport({ width: 320, height: 640, isMobile: true });
     await page.setDefaultNavigationTimeout(120_000);
@@ -372,10 +419,7 @@ async function runMobileAxeAudit(url, browser) {
 
     return { reflowIssues, violations: results?.violations || [] };
   } finally {
-    await Promise.race([
-      page.close().catch(() => {}),
-      new Promise(r => setTimeout(r, 5_000)),
-    ]);
+    await closeTab(page);
   }
 }
 
@@ -384,7 +428,7 @@ async function runMobileAxeAudit(url, browser) {
 // Also extracts interactive element labels for WCAG 3.2.4 cross-page analysis.
 // Returns { issues, interactiveLabels }.
 async function runFullAxeAudit(url, browser) {
-  const page = await browser.newPage();
+  const page = await openTab(browser);
   try {
     await page.setDefaultNavigationTimeout(120_000);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
@@ -428,9 +472,14 @@ async function runFullAxeAudit(url, browser) {
           isGlobal: isInGlobal(fr),
         }));
 
-        const links = Array.from(document.querySelectorAll('a[href]'))
-          .map(a => a.href)
-          .filter(h => h && (h.startsWith('http://') || h.startsWith('https://')));
+        // Capped: only the first 300 unique links per page feed the broken-link
+        // check (which itself samples 300 site-wide), and an uncapped list on a
+        // mega-menu site costs more memory than the rest of the page result.
+        const links = [...new Set(
+          Array.from(document.querySelectorAll('a[href]'))
+            .map(a => a.href)
+            .filter(h => h && (h.startsWith('http://') || h.startsWith('https://')))
+        )].slice(0, 300);
 
         return { forms, iframes, links };
       });
@@ -489,10 +538,7 @@ async function runFullAxeAudit(url, browser) {
     }
     return { issues, interactiveLabels, supplementalData };
   } finally {
-    await Promise.race([
-      page.close().catch(() => {}),
-      new Promise(r => setTimeout(r, 5_000)),
-    ]);
+    await closeTab(page);
   }
 }
 
@@ -500,7 +546,7 @@ async function runFullAxeAudit(url, browser) {
 // Covers WCAG criteria not fully tested by axe-core (focus visible, hover
 // content, on-focus/on-input, error identification, reflow).
 async function runIbmAudit(url, browser) {
-  const page = await browser.newPage();
+  const page = await openTab(browser);
   try {
     await page.setDefaultNavigationTimeout(120_000);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120_000 });
@@ -587,10 +633,7 @@ async function runIbmAudit(url, browser) {
     }
     return issues;
   } finally {
-    await Promise.race([
-      page.close().catch(() => {}),
-      new Promise(r => setTimeout(r, 5_000)),
-    ]);
+    await closeTab(page);
   }
 }
 
@@ -843,7 +886,7 @@ async function _runAxeIbmAudit(url, browser, opts) {
   if (opts.wcag22) {
     // axe target-size rule (2.5.8)
     try {
-      const page22 = await browser.newPage();
+      const page22 = await openTab(browser);
       try {
         await page22.setDefaultNavigationTimeout(60_000);
         await page22.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -874,7 +917,7 @@ async function _runAxeIbmAudit(url, browser, opts) {
           });
         }
       } finally {
-        await page22.close().catch(() => {});
+        await closeTab(page22);
       }
     } catch (err) {
       console.warn(`[wcag22-axe] Skipped for ${url}: ${err.message}`);

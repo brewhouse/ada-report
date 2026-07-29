@@ -248,7 +248,7 @@
       const r = await fetch('/api/system-reset', { method: 'POST' });
       const d = await r.json();
       const el = document.getElementById('reset-result');
-      el.textContent = `Done — Chrome killed, ${d.cancelledActive.length} active + ${d.cancelledQueue.length} queued audits cancelled, ${d.slotsReleased} semaphore slot(s) released, ${d.sessionsEvicted} sessions cleared from memory.`;
+      el.textContent = `Done — Chrome killed, ${d.cancelledActive.length} active + ${d.cancelledQueue.length} queued audits cancelled, ${d.slotsReleased} semaphore slot(s) draining, ${d.sessionsEvicted} sessions cleared from memory.`;
       el.classList.add('visible');
     } finally {
       btn.disabled = false;

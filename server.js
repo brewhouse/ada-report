@@ -8,8 +8,8 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import nodemailer from 'nodemailer';
 import puppeteer from 'puppeteer';
-import { startAudit, rescanPage, forceReleaseGlobalSlot, getGlobalAuditCount } from './src/audit-manager.js';
-import { killAllChrome, countChromeProcesses } from './src/lighthouse-runner.js';
+import { startAudit, rescanPage, getGlobalAuditCount } from './src/audit-manager.js';
+import { killAllChrome, countChromeProcesses, openTab, closeTab, getTabStats } from './src/lighthouse-runner.js';
 import { startTmpJanitor, sweepChromeTmp } from './src/tmp-janitor.js';
 import { generateReport, generateSummaryReport, generateVpatReport } from './src/report-generator.js';
 import { applyFix } from './src/wp-fixer.js';
@@ -244,11 +244,26 @@ wss.on('connection', (ws, req) => {
   ws.on('error', () => {});
 });
 
+// A full-session update carries every page and every issue, so on a large audit
+// one message can be tens of MB. ws buffers anything the client hasn't drained
+// in off-heap memory, which grows without limit and is invisible to the V8 heap
+// cap — a stalled browser tab could push the container's RSS up on its own.
+// Progress updates are therefore dropped for any socket that has fallen this far
+// behind; it will re-sync from the next update it can keep up with, or from the
+// REST endpoint. Terminal messages are never dropped.
+const WS_MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+
 function broadcastToAudit(auditId, message) {
   const conns = wsConnections.get(auditId);
   if (!conns) return;
+  const status = message?.data?.status;
+  const isTerminal = status === 'completed' || status === 'error';
   const msg = JSON.stringify(message);
-  conns.forEach(ws => { if (ws.readyState === ws.OPEN) ws.send(msg); });
+  conns.forEach(ws => {
+    if (ws.readyState !== ws.OPEN) return;
+    if (!isTerminal && ws.bufferedAmount > WS_MAX_BUFFERED_BYTES) return;
+    ws.send(msg);
+  });
 }
 
 function sanitizeSession(session) {
@@ -374,6 +389,19 @@ async function processAuditQueue() {
     broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
   }
 
+  // Coalescing variant. sanitizeSession() + JSON.stringify() walk every page and
+  // issue accumulated so far, so calling it once per completed page makes the
+  // work quadratic in page count — the last page of a 5000-page audit serialized
+  // all 5000. The client appends whatever pages are new since its last render,
+  // so batching several pages into one message is equivalent for it.
+  function scheduleBroadcast() {
+    if (broadcastTimer) return;
+    broadcastTimer = setTimeout(() => {
+      broadcastTimer = null;
+      broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
+    }, 2000);
+  }
+
   try {
     await Promise.race([
       startAudit(session, (update) => {
@@ -386,7 +414,7 @@ async function processAuditQueue() {
             const { completedPage, ...rest } = update;
             Object.assign(session, rest);
 
-            flushBroadcast();
+            scheduleBroadcast();
 
             // Persist to DB (issues stay in RAM for broadcasts + summary).
             savePageToDb(session, page, pendingPageSaves);
@@ -394,12 +422,7 @@ async function processAuditQueue() {
             const { completedPage, ...rest } = update;
             Object.assign(session, rest);
             // Debounce when there's no page data (progress-only update).
-            if (!broadcastTimer) {
-              broadcastTimer = setTimeout(() => {
-                broadcastTimer = null;
-                broadcastToAudit(session.id, { type: 'update', data: sanitizeSession(session) });
-              }, 2000);
-            }
+            scheduleBroadcast();
           }
         } else {
           Object.assign(session, update);
@@ -574,7 +597,7 @@ async function generatePdfBuffer(htmlContent) {
       '--no-first-run', '--no-zygote',
     ],
   });
-  const page = await browser.newPage();
+  const page = await openTab(browser);
   try {
     await page.setContent(htmlContent, { waitUntil: 'networkidle0', timeout: 60000 });
     return await page.pdf({
@@ -584,6 +607,7 @@ async function generatePdfBuffer(htmlContent) {
       margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' },
     });
   } finally {
+    await closeTab(page);
     await browser.close().catch(() => {});
   }
 }
@@ -985,11 +1009,12 @@ app.post('/api/audit/:id/email', async (req, res) => {
     const session   = await getSessionForReport(req.params.id);
     const brandKey  = brand || null;
     const ignoredIssuesList = await getIgnoredIssuesForSite(session.url).catch(() => []);
-    const [summaryPdf, detailPdf, vpatPdf] = await Promise.all([
-      generatePdfBuffer(generateSummaryReport(session, brandKey, false, ignoredIssuesList)),
-      generatePdfBuffer(generateReport(session, brandKey, false, ignoredIssuesList)),
-      generatePdfBuffer(generateVpatReport(session, brandKey, ignoredIssuesList)),
-    ]);
+    // Rendered one at a time on purpose: each report holds a full-size HTML
+    // string, a Chrome renderer with that DOM, and the resulting PDF buffer.
+    // Running all three at once tripled peak memory for large audits.
+    const summaryPdf = await generatePdfBuffer(generateSummaryReport(session, brandKey, false, ignoredIssuesList));
+    const detailPdf  = await generatePdfBuffer(generateReport(session, brandKey, false, ignoredIssuesList));
+    const vpatPdf    = await generatePdfBuffer(generateVpatReport(session, brandKey, ignoredIssuesList));
 
     const domain   = new URL(session.url).hostname.replace(/[^a-z0-9]/gi, '-');
     const date     = new Date().toISOString().split('T')[0];
@@ -1128,14 +1153,26 @@ app.get('/api/system-status', (_req, res) => {
     ageMs:     session.startTime ? now - new Date(session.startTime).getTime() : null,
   }));
 
+  const mem = process.memoryUsage();
+
   res.json({
     timestamp:        new Date().toISOString(),
     uptimeSeconds:    Math.floor(process.uptime()),
     chromeProcesses:  countChromeProcesses(),
+    // Open Chrome tabs are the real memory driver — watch this, not the browser
+    // count. A persistently non-zero `waiting` means the box is at its ceiling.
+    tabs:             getTabStats(),
     semaphoreSlots:   getGlobalAuditCount(),
     runningAudits,
     maxConcurrent:    MAX_CONCURRENT_AUDITS,
     queueLength:      auditQueue.length,
+    memoryMb: {
+      rss:          Math.round(mem.rss / 1048576),
+      heapUsed:     Math.round(mem.heapUsed / 1048576),
+      // ws send buffers and PDF buffers live here, not in the heap.
+      external:     Math.round(mem.external / 1048576),
+      arrayBuffers: Math.round(mem.arrayBuffers / 1048576),
+    },
     active,
     queued,
     totalSessionsInMemory: auditSessions.size,
@@ -1175,10 +1212,12 @@ app.post('/api/system-reset', (_req, res) => {
     }
   }
 
-  // 4. Reset the running-audits counter and drain the semaphore
+  // 4. Reset the running-audits counter. The global semaphore is left alone:
+  //    killAllChrome() above makes every in-flight audit fail fast, and each one
+  //    releases its own slot as it unwinds. Force-draining it here raced with
+  //    those releases and left the count below the number of live audits.
   runningAudits = 0;
   const slotsHeld = getGlobalAuditCount();
-  for (let i = 0; i < slotsHeld; i++) forceReleaseGlobalSlot();
 
   // 5. Evict all completed/error sessions from memory — they're persisted in
   //    MySQL so nothing is lost. Keeps memory lean and the status count honest.
@@ -1190,7 +1229,7 @@ app.post('/api/system-reset', (_req, res) => {
     }
   }
 
-  console.log(`[system-reset] Chrome killed, ${cancelledQueue.length} queued + ${cancelledActive.length} active audits cancelled, ${slotsHeld} semaphore slot(s) released, ${evicted} sessions evicted from memory`);
+  console.log(`[system-reset] Chrome killed, ${cancelledQueue.length} queued + ${cancelledActive.length} active audits cancelled, ${slotsHeld} semaphore slot(s) draining, ${evicted} sessions evicted from memory`);
 
   res.json({
     success: true,
@@ -1262,7 +1301,11 @@ app.delete('/api/audit/:id', (req, res) => {
 
   if (wasActive || wasDequeued) {
     runningAudits = Math.max(0, runningAudits - 1);
-    forceReleaseGlobalSlot();
+    // Deliberately NOT releasing the global audit slot here. The audit is still
+    // winding down (browsers open) and startAudit's finally releases the slot
+    // when it actually stops. Releasing it here too double-counted one acquire,
+    // so every cancel permanently raised the real concurrency ceiling by one —
+    // which is how the box ended up running far more Chrome than the cap allows.
     processAuditQueue();
   }
 

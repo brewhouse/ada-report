@@ -164,12 +164,7 @@ function _acquireGlobalSlot() {
 
 function _releaseGlobalSlot() {
   if (_globalWaiters.length > 0) _globalWaiters.shift()();
-  else _globalAuditCount--;
-}
-
-// Force-release a global slot — used when a timed-out audit left the semaphore stuck.
-export function forceReleaseGlobalSlot() {
-  if (_globalAuditCount > 0) _releaseGlobalSlot();
+  else if (_globalAuditCount > 0) _globalAuditCount--;
 }
 
 // Return the current number of held global audit slots (for diagnostics).
@@ -178,10 +173,12 @@ export function getGlobalAuditCount() {
 }
 
 // Number of pages to audit in parallel within a single audit (each page = one browser).
-// 6 pages × up to 4 simultaneous audits = 24 Chrome instances max.
-// Tuned for Render Pro Max (16GB RAM): 24 × ~300MB = ~7GB for Chrome,
-// well within limits. axe-core has no CPU benchmark phase so burst usage is brief.
-const CONCURRENT_PAGES = 6;
+// The real memory constraint is renderers, not browsers: every page audit opens
+// 3 tabs concurrently (desktop axe + mobile axe + IBM), so this pool is ~3×
+// this number of renderers at ~300 MB each. Total Chrome RSS is hard-capped by
+// MAX_CONCURRENT_TABS in lighthouse-runner.js — this value only controls how
+// much of that budget a single audit tries to claim.
+const CONCURRENT_PAGES = Number(process.env.CONCURRENT_PAGES) || 4;
 
 export async function startAudit(session, onUpdate) {
   await _acquireGlobalSlot();
@@ -190,6 +187,15 @@ export async function startAudit(session, onUpdate) {
   } finally {
     _releaseGlobalSlot();
   }
+}
+
+// Cancellation is cooperative: server.js sets `_cancelledExternally` on the
+// session and the audit unwinds at the next checkpoint, closing its browsers on
+// the way out. Nothing outside this module may release the audit's semaphore
+// slot — the finally in startAudit owns that, and releasing it early is what
+// previously let cancelled-but-still-running audits stack up past the limit.
+function isCancelled(session) {
+  return !!session._cancelledExternally;
 }
 
 async function _runAudit(session, onUpdate) {
@@ -242,6 +248,7 @@ async function _runAudit(session, onUpdate) {
     const BATCH = 25;
     const statuses = [];
     for (let i = 0; i < pages.length; i += BATCH) {
+      if (isCancelled(session)) return;
       const batch = pages.slice(i, i + BATCH);
       statuses.push(...await Promise.all(batch.map(u => checkUrlStatus(u))));
     }
@@ -264,6 +271,8 @@ async function _runAudit(session, onUpdate) {
     throw new Error('No auditable pages found — all discovered URLs either redirect, return 404, or are access-denied (403).');
   }
 
+  if (isCancelled(session)) return;
+
   onUpdate({
     status: 'auditing',
     crawledUrls: pages,
@@ -283,6 +292,7 @@ async function _runAudit(session, onUpdate) {
   const browsers = [];
   try {
     for (let i = 0; i < concurrency; i++) {
+      if (isCancelled(session)) return;
       if (i > 0) await new Promise(r => setTimeout(r, 1500));
       try {
         browsers.push(await launchBrowser());
@@ -290,7 +300,7 @@ async function _runAudit(session, onUpdate) {
         console.warn('[audit] Browser launch failed:', err.message);
       }
     }
-    if (browsers.length === 0) {
+    if (browsers.length === 0 && !isCancelled(session)) {
       // Pool launch failed entirely — kill any lingering Chrome, wait 5 s,
       // then try one last time with a single browser before giving up.
       console.warn('[audit] All pool launches failed — running emergency cleanup and retrying with 1 browser');
@@ -327,6 +337,9 @@ async function _runAudit(session, onUpdate) {
     // Use index into browsers[] so auditWorker can replace a hung browser.
     async function auditWorker(workerIdx) {
       while (pageIndex < pages.length) {
+        // Cancelled audits stop claiming pages immediately; the shared finally
+        // below closes every browser in the pool on the way out.
+        if (isCancelled(session)) break;
         const i = pageIndex++;
         if (i >= pages.length) break;
 
@@ -401,6 +414,8 @@ async function _runAudit(session, onUpdate) {
     }
 
     await Promise.all(browsers.map((_, idx) => auditWorker(idx)));
+
+    if (isCancelled(session)) return;
 
     // Phase 4: Cross-page consistency check for WCAG 3.2.4
     const completed = auditedPages.filter(p => p && p.status === 'completed');
@@ -484,6 +499,12 @@ async function _runAudit(session, onUpdate) {
         brokenLinks,
       });
     }
+
+    // supplementalData holds every <a href> on every page — on a link-heavy site
+    // that is far larger than the issue list it sits next to, and the caller
+    // keeps these page objects for the lifetime of the session. It has been
+    // saved to the DB and aggregated above, so drop it now.
+    for (const page of completed) delete page.supplementalData;
 
     // Phase 6: Compute summary
     const scores = completed.map(p => p.score).filter(s => s !== null);
