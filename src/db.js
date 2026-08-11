@@ -81,6 +81,7 @@ export async function initDb() {
         error_message    TEXT,
         url_list         JSON,
         exclude_sitemaps JSON,
+        wcag22           TINYINT(1)    NOT NULL DEFAULT 0,
         created_at       DATETIME      DEFAULT CURRENT_TIMESTAMP,
         updated_at       DATETIME      DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_as_status     (status),
@@ -140,6 +141,18 @@ export async function initDb() {
     if (!existingCols.has('wcag_level')) {
       await conn.execute("ALTER TABLE audit_issues ADD COLUMN wcag_level VARCHAR(10) NULL");
       console.log('[db] Added missing column: audit_issues.wcag_level');
+    }
+
+    // audit_sessions.wcag22 — the "Also check for WCAG 2.2 criteria" option.
+    // Reports always reload the session from the DB, so this flag has to be
+    // persisted or the VPAT loses its WCAG 2.2 tables.
+    const [sessCols] = await conn.execute(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_sessions'`
+    );
+    if (!new Set(sessCols.map(c => c.COLUMN_NAME)).has('wcag22')) {
+      await conn.execute("ALTER TABLE audit_sessions ADD COLUMN wcag22 TINYINT(1) NOT NULL DEFAULT 0");
+      console.log('[db] Added missing column: audit_sessions.wcag22');
     }
 
     // ignored_issues — persists issues marked as "ignored/visually verified"
@@ -382,6 +395,7 @@ function sessionToRow(session) {
     session.error || null,
     session.urlList         ? JSON.stringify(session.urlList)         : null,
     session.excludeSitemaps ? JSON.stringify(session.excludeSitemaps) : null,
+    session.wcag22 ? 1 : 0,
   ];
 }
 
@@ -418,6 +432,7 @@ function rowToSession(row) {
     error:           row.error_message || null,
     urlList:         safeJsonParse(row.url_list,         null),
     excludeSitemaps: safeJsonParse(row.exclude_sitemaps, null),
+    wcag22:          !!row.wcag22,
   };
 }
 
@@ -431,8 +446,8 @@ export async function upsertSession(session) {
         average_score, min_score, max_score,
         total_issues, critical_issues, serious_issues, moderate_issues, minor_issues,
         pages_above_90, pages_70_to_89, pages_50_to_69, pages_below_50,
-        error_message, url_list, exclude_sitemaps)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        error_message, url_list, exclude_sitemaps, wcag22)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON DUPLICATE KEY UPDATE
        status           = VALUES(status),
        end_time         = VALUES(end_time),
@@ -453,7 +468,8 @@ export async function upsertSession(session) {
        pages_below_50   = VALUES(pages_below_50),
        error_message    = VALUES(error_message),
        url_list         = VALUES(url_list),
-       exclude_sitemaps = VALUES(exclude_sitemaps)`,
+       exclude_sitemaps = VALUES(exclude_sitemaps),
+       wcag22           = VALUES(wcag22)`,
     vals
   );
 }

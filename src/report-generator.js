@@ -336,7 +336,10 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
     if (MANUAL_REMARKS[wcagId]) {
       return escapeHtml(MANUAL_REMARKS[wcagId]);
     }
-    if (!LIGHTHOUSE_TESTED_WCAG.has(wcagId)) {
+    // testedWcag (not LIGHTHOUSE_TESTED_WCAG) so the WCAG 2.2 criteria get real
+    // remarks when that option was enabled — otherwise the conformance column
+    // would read "Supports" next to a "not evaluated" remark.
+    if (!testedWcag.has(wcagId)) {
       return `<em style="color:#64748b">Not evaluated by automated testing. Manual evaluation recommended.</em>`;
     }
     const data = issuesByWcag[wcagId];
@@ -464,12 +467,12 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
       <tr><td>Report Date</td><td>${escapeHtml(auditDateShort)}</td></tr>
       <tr><td>Version</td><td>Live website evaluated on ${escapeHtml(auditDateShort)}</td></tr>
       <tr><td>Vendor / Evaluator</td><td>${escapeHtml(brandName)}</td></tr>
-      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse, Axe Tools, and IBM Equal Access Checker. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
+      <tr><td>Notes</td><td>This report is based on automated accessibility testing using Google Lighthouse, Axe Tools, and IBM Equal Access Checker${includeWcag22 ? ', plus targeted checks for the success criteria introduced in WCAG 2.2' : ''}. Automated testing covers a subset of WCAG success criteria. Manual testing is recommended for complete conformance evaluation.</td></tr>
     </table>
 
     <!-- Evaluation Methods -->
     <h2>Evaluation Methods Used</h2>
-    <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>Axe Tools</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG 2.1 success criteria detectable through automated means.</p>
+    <p>Automated accessibility testing using <strong>Google Lighthouse</strong>, <strong>Axe Tools</strong>, and <strong>IBM Equal Access Checker</strong> was performed on <strong>${totalAudited.toLocaleString()}</strong> pages of <em>${escapeHtml(url)}</em>. The combined evaluation assessed WCAG ${includeWcag22 ? '2.2' : '2.1'} success criteria detectable through automated means.${includeWcag22 ? ' The success criteria added in WCAG 2.2 (2.4.11, 2.5.7, 2.5.8, 3.2.6, 3.3.7, 3.3.8) were evaluated using dedicated automated checks and are reported in Tables 3 and 4.' : ''}</p>
     <p style="margin-top:5px;">Overall results: Average score <strong>${adjAvgScore}/100</strong> &bull; ${Math.max(0, (summary?.totalIssues ?? 0) - ignoredInSession).toLocaleString()} active issues found${ignoredInSession > 0 ? ` (${ignoredInSession} ignored / visually verified)` : ''} &bull; ${(summary?.criticalIssues ?? 0)} critical &bull; ${(summary?.seriousIssues ?? 0)} serious &bull; ${(summary?.moderateIssues ?? 0)} moderate &bull; ${(summary?.minorIssues ?? 0)} minor.</p>
 
     <!-- Applicable Standards -->
@@ -477,6 +480,7 @@ export function generateVpatReport(session, brandKey = null, ignoredIssuesList =
     <table class="info-tbl">
       <tr><td>Standard / Guideline</td><td>Included In Report</td></tr>
       <tr><td>Web Content Accessibility Guidelines 2.1</td><td>Level A (Yes) &bull; Level AA (Yes) &bull; Level AAA (No)</td></tr>
+      ${includeWcag22 ? `<tr><td>Web Content Accessibility Guidelines 2.2</td><td>Level A (Yes) &bull; Level AA (Yes) &bull; Level AAA (No)</td></tr>` : ''}
     </table>
 
     <!-- Terms -->

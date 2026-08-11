@@ -618,6 +618,11 @@ async function generatePdfBuffer(htmlContent) {
 async function getSessionForReport(id) {
   try {
     const full = await getFullSession(id);
+    // Scan options live in memory for the life of the process; carry the WCAG 2.2
+    // flag over in case the DB row predates the wcag22 column or hasn't been
+    // updated yet, so the VPAT still renders its 2.2 tables.
+    const mem = auditSessions.get(id);
+    if (full && mem?.wcag22) full.wcag22 = true;
     return full;
   } catch (err) {
     console.warn('[db] getSessionForReport error:', err.message);
